@@ -494,7 +494,14 @@ button#addCustomBtn:hover, button#addCustomBtn:active, button#addCustomBtn:focus
       </div>
       <div style="flex:0 0 220px;">
         <label>Цена за 1 / год (₽)</label>
-        <input id="customPrice" type="number" min="0" placeholder="Например: 120000" />
+        <input
+  id="customPrice"
+  type="number"
+  min="0"
+  max="99999999"
+  step="1"
+  placeholder="Например: 1200000"
+/>
       </div>
     </div>
   </div>
