@@ -176,6 +176,9 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 </div>
 <div class="grid">
 <div class="card">
+<h2>Модули</h2>
+<div class="chips" id="modules"></div>
+<div class="hr"></div>
 <h2>Вводные</h2>
 <div class="row">
 <label>Кол-во конечных точек
@@ -189,10 +192,21 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 </label>
 </div>
 <div class="row" style="margin-top:10px">
-<label>Тариф техподдержки
+<label>Тариф ТП ИТМен
           <select id="supportTier"></select>
 <span class="small">ТП считается ежегодно; скидка партнёра применяется</span>
 </label>
+<div class="field" id="prismaSupportBlock" style="display:none">
+<label>ТП Призма данных
+            <select id="prismaSupportTier">
+<option value="none">Не выбрано</option>
+<option value="warranty">ТП Призма — Гарантийная</option>
+<option value="standard">ТП Призма — Стандартная</option>
+<option value="extended">ТП Призма — Расширенная</option>
+</select>
+<span class="small">ТП Призма считается отдельно от ТП ИТМен; партнёрская скидка применяется, если включена.</span>
+</label>
+</div>
 <label>Наименование клиента
           <input id="clientName" placeholder="ООО «Промресурс»" type="text"/>
 </label>
@@ -232,7 +246,7 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
   <div class="field">
     <div class="discWrap">
       <input id="useOtherDiscountsGate" style="width:18px;height:18px" type="checkbox"/>
-      <label for="useOtherDiscountsGate">Применить скидки (ТП / Модули / Внедрение)</label>
+<label for="useOtherDiscountsGate">Применить скидки (ТП ИТМен / ТП Призма / Лицензии Призма / Модули / Внедрение)</label>
     </div>
     <small class="hint">PIN-код вводится каждый раз при включении. После ввода можно выбрать, к чему применять скидку.</small>
   </div>
@@ -250,15 +264,29 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 <div class="row" style="margin-top:8px">
 <div class="field"><div class="discWrap">
 <input id="useSupportDiscount" style="width:18px;height:18px" type="checkbox"/>
-<label for="useSupportDiscount">Применять скидку техподдержки</label>
+<label for="useSupportDiscount">Применять скидку ТП ИТМен</label>
 </div><div class="discInput"><input id="discSupport" max="100" min="0" step="1" type="number" value="0"/></div>
-<small class="hint">Применяется только к годовому итогу ТП (в карточках/итогах)</small>
+<small class="hint">Применяется только к годовому итогу ТП ИТМен (в карточках/итогах)</small>
 </div>
 <div class="field"><div class="discWrap">
 <input id="useImplDiscount" style="width:18px;height:18px" type="checkbox"/>
 <label for="useImplDiscount">Применять скидку внедрения</label>
 </div><div class="discInput"><input id="discImpl" max="100" min="0" step="1" type="number" value="0"/></div>
 <small class="hint">Применяется только к разовому внедрению (в карточках/итогах)</small>
+</div>
+</div>
+<div class="row" style="margin-top:8px">
+<div class="field"><div class="discWrap">
+<input id="usePrismaSupportDiscount" style="width:18px;height:18px" type="checkbox"/>
+<label for="usePrismaSupportDiscount">Применять скидку ТП Призма</label>
+</div><div class="discInput"><input id="discPrismaSupport" max="100" min="0" step="1" type="number" value="0"/></div>
+<small class="hint">Применяется только к годовому итогу ТП Призма (в карточках/итогах)</small>
+</div>
+<div class="field"><div class="discWrap">
+<input id="usePrismaLicDiscount" style="width:18px;height:18px" type="checkbox"/>
+<label for="usePrismaLicDiscount">Применять скидку лицензий Призма</label>
+</div><div class="discInput"><input id="discPrismaLic" max="100" min="0" step="1" type="number" value="0"/></div>
+<small class="hint">Применяется только к лицензиям Призма данных (в карточках/итогах)</small>
 </div>
 </div>
 <div class="row" style="margin-top:6px">
@@ -271,9 +299,6 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 <label>Комментарий
         <textarea id="comment" placeholder="Доп. условия, контактные данные, ссылки и т.д."></textarea>
 </label>
-<div class="hr"></div>
-<h2>Модули</h2>
-<div class="chips" id="modules"></div>
 <div class="hr"></div>
 <div class="badge">Эффекты:
 <label class="switchline"><input type="checkbox" id="showROI">Показать ROI (оценка окупаемости)</label>
@@ -414,7 +439,7 @@ function initOtherDiscountGate(){
   const panel = document.getElementById('otherDiscountsPanel');
   if(!gate || !panel) return;
 
-  const innerCbs = ['useModuleDiscount','useSupportDiscount','useImplDiscount'];
+  const innerCbs = ['useModuleDiscount','useSupportDiscount','useImplDiscount','usePrismaSupportDiscount','usePrismaLicDiscount'];
 
   const clearInner = ()=>{
     innerCbs.forEach(id=>{
@@ -468,6 +493,8 @@ function syncDiscountUI(){
     ['useModuleDiscount','discModules'],
     ['useSupportDiscount','discSupport'],
     ['useImplDiscount','discImpl'],
+    ['usePrismaSupportDiscount','discPrismaSupport'],
+    ['usePrismaLicDiscount','discPrismaLic'],
   ];
   pairs.forEach(([cbId, inputId]) => {
     const cb = document.getElementById(cbId);
@@ -549,7 +576,45 @@ const PRICING = {
   }
 };
 
-const MODULE_LIST = ["Базовый","Модель данных","Обогащение ПО"];
+// Отдельный прайс для Призмы данных (фикс по диапазонам конечных точек; qty=1, но тариф выбирается по диапазону)
+const PRISMA_PRICING = {
+  license: {
+    annual: {
+      "100-500":   { price: 630000,  sku: "PRISMA-DATA-12-100-500" },
+      "500-1000":  { price: 1050000, sku: "PRISMA-DATA-12-500-1000" },
+      "1000-5000": { price: 1750000, sku: "PRISMA-DATA-12-1000-5000" },
+      "5000+":     { price: 2625000, sku: "PRISMA-DATA-12-5000+" }
+    },
+    perpetual:{
+      "100-500":   { price: 1575000, sku: "PRISMA-DATA-0-100-500" },
+      "500-1000":  { price: 3150000, sku: "PRISMA-DATA-0-500-1000" },
+      "1000-5000": { price: 8750000, sku: "PRISMA-DATA-0-1000-5000" },
+      "5000+":     { price: 13125000,sku: "PRISMA-DATA-0-5000+" }
+    }
+  },
+  support: {
+    warranty: {
+      "100-500":   { price: 0, sku: "PRISMA-TS-GRT-100-500" },
+      "500-1000":  { price: 0, sku: "PRISMA-TS-GRT-500-1000" },
+      "1000-5000": { price: 0, sku: "PRISMA-TS-GRT-1000-5000" },
+      "5000+":     { price: 0, sku: "PRISMA-TS-GRT-5000+" }
+    },
+    standard:  {
+      "100-500":   { price: 100000, sku: "PRISMA-TS-STD-100-500" },
+      "500-1000":  { price: 200000, sku: "PRISMA-TS-STD-500-1000" },
+      "1000-5000": { price: 375000, sku: "PRISMA-TS-STD-1000-5000" },
+      "5000+":     { price: 550000, sku: "PRISMA-TS-STD-5000+" }
+    },
+    extended:  {
+      "100-500":   { price: 135000, sku: "PRISMA-TS-EXT-100-500" },
+      "500-1000":  { price: 270000, sku: "PRISMA-TS-EXT-500-1000" },
+      "1000-5000": { price: 750000, sku: "PRISMA-TS-EXT-1000-5000" },
+      "5000+":     { price: 1125000,sku: "PRISMA-TS-EXT-5000+" }
+    }
+  }
+};
+
+const MODULE_LIST = ["Базовый","Модель данных","Обогащение ПО","Призма данных"];
 
 function initModules() {
   const el = document.getElementById('modules');
@@ -563,10 +628,27 @@ function initModules() {
       const a = chip.dataset.active === '1' ? '0' : '1';
       chip.dataset.active = a;
       chip.querySelector('.muted').textContent = a==='1' ? 'вкл' : 'выкл';
+      updatePrismaUi();
       recalc();
     };
     el.appendChild(chip);
   });
+  updatePrismaUi();
+}
+
+function updatePrismaUi() {
+  const prismaChip = Array.from(document.querySelectorAll('#modules .chip h4'))
+    .find(h => h.textContent.trim() === 'Призма данных');
+  const prismaOn = prismaChip && prismaChip.parentElement.dataset.active === '1';
+  const block = document.getElementById('prismaSupportBlock');
+  if (!block) return;
+  if (prismaOn) {
+    block.style.display = 'block';
+  } else {
+    block.style.display = 'none';
+    const sel = document.getElementById('prismaSupportTier');
+    if (sel) sel.value = 'none';
+  }
 }
 
 function fillSupportTiers() {
@@ -587,31 +669,50 @@ function getRange(endpoints) {
   return "25001-50000";
 }
 
+function getPrismaRange(endpoints){
+  if (endpoints <= 500) return "100-500";
+  if (endpoints <= 1000) return "500-1000";
+  if (endpoints <= 5000) return "1000-5000";
+  return "5000+";
+}
+
 function fmt(n){return (n||0).toLocaleString('ru-RU')+' ₽'}
 
 function buildItems() {
   const endpoints = parseInt(document.getElementById('endpoints').value||'0',10);
   const licenseType = document.getElementById('licenseType').value;
   const supportTier = document.getElementById('supportTier').value;
+  const prismaSupportTier = document.getElementById('prismaSupportTier')?.value || 'none';
   const range = getRange(endpoints);
+  const prismaRange = getPrismaRange(endpoints);
   const items = [];
 
   // Лицензии — цена за единицу (endpoint), qty=endpoints (или 1 если unlim)
   document.querySelectorAll('#modules .chip').forEach(ch => {
     if (ch.dataset.active !== '1') return;
     const name = ch.querySelector('h4').textContent;
-    const cfg = PRICING.items[name][licenseType];
-    if (!cfg) return;
-    let unitPrice = 0, sku = '', qty = 1;
-    if (endpoints > 50000) {
-      unitPrice = cfg.unlim.price; sku = cfg.unlim.sku; qty = 1;
+    // Призма данных — отдельная фиксированная лицензия, не зависит от общего кол-ва конечных точек
+    if (name === 'Призма данных') {
+      const pcfg = PRISMA_PRICING.license[licenseType]?.[prismaRange];
+      if (!pcfg) return;
+      items.push({
+        group:'prisma_license', nomen:'Призма данных', sku:pcfg.sku, name:'Призма данных — лицензия '+(licenseType==='annual'?'Срочная':'Бессрочная'),
+        qty:1, unitPrice:pcfg.price, vatApplies:false
+      });
     } else {
-      unitPrice = cfg.per_endpoint[range].price; sku = cfg.per_endpoint[range].sku; qty = endpoints;
+      const cfg = PRICING.items[name][licenseType];
+      if (!cfg) return;
+      let unitPrice = 0, sku = '', qty = 1;
+      if (endpoints > 50000) {
+        unitPrice = cfg.unlim.price; sku = cfg.unlim.sku; qty = 1;
+      } else {
+        unitPrice = cfg.per_endpoint[range].price; sku = cfg.per_endpoint[range].sku; qty = endpoints;
+      }
+      items.push({
+        group:'license', nomen:name, sku:sku, name:name+' — '+(licenseType==='annual'?'Срочная':'Бессрочная'),
+        qty:qty, unitPrice:unitPrice, vatApplies:false
+      });
     }
-    items.push({
-      group:'license', nomen:name, sku:sku, name:name+' — '+(licenseType==='annual'?'Срочная':'Бессрочная'),
-      qty:qty, unitPrice:unitPrice, vatApplies:false
-    });
   });
 
   // Поддержка — цена за единицу (endpoint), qty=endpoints
@@ -625,6 +726,19 @@ function buildItems() {
     });
   }
 
+  // ТП Призма — отдельный фиксированный блок, не зависит от общего числа конечных точек
+  if (prismaSupportTier && prismaSupportTier !== 'none') {
+    const scfg = PRISMA_PRICING.support[prismaSupportTier]?.[prismaRange];
+    if (scfg) {
+      items.push({
+        group:'prisma_support', nomen:'ТП Призма данных', sku:scfg.sku,
+        name:'ТП Призма данных — '+
+          (prismaSupportTier==='standard'?'Стандартная':prismaSupportTier==='extended'?'Расширенная':'Гарантийная'),
+        qty:1, unitPrice:scfg.price, vatApplies:true
+      });
+    }
+  }
+
   // Внедрение
   if (document.getElementById('implOn').checked) {
     items.push({
@@ -633,7 +747,11 @@ function buildItems() {
     });
   }
 
-  return items;
+  // Сначала всё, что относится к ИТМен, затем все позиции Призмы данных
+  const prismaGroups = ['prisma_license','prisma_support'];
+  const itmenItems = items.filter(it => !prismaGroups.includes(it.group));
+  const prismaItems = items.filter(it => prismaGroups.includes(it.group));
+  return itmenItems.concat(prismaItems);
 }
 
 function computeTotals(items) {
@@ -641,12 +759,18 @@ function computeTotals(items) {
   const dMod = getDisc('discModules','useModuleDiscount');
   const dSup = getDisc('discSupport','useSupportDiscount');
   const dImp = getDisc('discImpl','useImplDiscount');
+  const dPrismaSup = getDisc('discPrismaSupport','usePrismaSupportDiscount');
+  const dPrismaLic = getDisc('discPrismaLic','usePrismaLicDiscount');
   let sumNoVAT = 0, sumWithVAT = 0, sumNoVATPartner = 0, sumWithVATPartner = 0;
   let supportFullNoVAT = 0, supportFullWithVAT = 0, supportPartnerNoVAT = 0, supportPartnerWithVAT = 0;
   let implFullNoVAT = 0, implFullWithVAT = 0, implPartnerNoVAT = 0, implPartnerWithVAT = 0;
+  let prismaSupFullNoVAT = 0, prismaSupFullWithVAT = 0, prismaSupPartnerNoVAT = 0, prismaSupPartnerWithVAT = 0;
 
   items.forEach(it => {
-    const effUnit = it.group === 'license' ? it.unitPrice * (1 - dMod) : it.unitPrice;
+    let effUnit = it.unitPrice;
+    if (it.group === 'license') effUnit = it.unitPrice * (1 - dMod);
+    if (it.group === 'prisma_license') effUnit = it.unitPrice * (1 - dPrismaLic);
+    if (it.group === 'prisma_support') effUnit = it.unitPrice * (1 - dPrismaSup);
     const subtotal = effUnit * it.qty;
     const partnerUnit = it.group === 'impl' ? effUnit : effUnit * (1 - discPct);
     const partnerSubtotal = partnerUnit * it.qty;
@@ -665,6 +789,12 @@ function computeTotals(items) {
       supportPartnerNoVAT += partnerSubtotal;
       supportPartnerWithVAT += partnerSubtotal + vatPartner;
     }
+    if (it.group === 'prisma_support') {
+      prismaSupFullNoVAT += subtotal;
+      prismaSupFullWithVAT += subtotal + vat;
+      prismaSupPartnerNoVAT += partnerSubtotal;
+      prismaSupPartnerWithVAT += partnerSubtotal + vatPartner;
+    }
     if (it.group === 'impl') {
       implFullNoVAT += subtotal;
       implFullWithVAT += subtotal + vat;
@@ -679,16 +809,25 @@ function computeTotals(items) {
   const supportPartnerNoVATAfter = supportPartnerNoVAT * (1 - dSup);
   const supportPartnerWithVATAfter = supportPartnerWithVAT * (1 - dSup);
 
+  const prismaSupFullNoVATAfter = prismaSupFullNoVAT * (1 - dPrismaSup);
+  const prismaSupFullWithVATAfter = prismaSupFullWithVAT * (1 - dPrismaSup);
+  const prismaSupPartnerNoVATAfter = prismaSupPartnerNoVAT * (1 - dPrismaSup);
+  const prismaSupPartnerWithVATAfter = prismaSupPartnerWithVAT * (1 - dPrismaSup);
+
   const implFullNoVATAfter = implFullNoVAT * (1 - dImp);
   const implFullWithVATAfter = implFullWithVAT * (1 - dImp);
   const implPartnerNoVATAfter = implPartnerNoVAT * (1 - dImp);
   const implPartnerWithVATAfter = implPartnerWithVAT * (1 - dImp);
 
   // скорректируем общие суммы (важно: не трогаем строки)
-  sumNoVAT = sumNoVAT - supportFullNoVAT - implFullNoVAT + supportFullNoVATAfter + implFullNoVATAfter;
-  sumWithVAT = sumWithVAT - supportFullWithVAT - implFullWithVAT + supportFullWithVATAfter + implFullWithVATAfter;
-  sumNoVATPartner = sumNoVATPartner - supportPartnerNoVAT - implPartnerNoVAT + supportPartnerNoVATAfter + implPartnerNoVATAfter;
-  sumWithVATPartner = sumWithVATPartner - supportPartnerWithVAT - implPartnerWithVAT + supportPartnerWithVATAfter + implPartnerWithVATAfter;
+  sumNoVAT = sumNoVAT - supportFullNoVAT - implFullNoVAT - prismaSupFullNoVAT
+    + supportFullNoVATAfter + implFullNoVATAfter + prismaSupFullNoVATAfter;
+  sumWithVAT = sumWithVAT - supportFullWithVAT - implFullWithVAT - prismaSupFullWithVAT
+    + supportFullWithVATAfter + implFullWithVATAfter + prismaSupFullWithVATAfter;
+  sumNoVATPartner = sumNoVATPartner - supportPartnerNoVAT - implPartnerNoVAT - prismaSupPartnerNoVAT
+    + supportPartnerNoVATAfter + implPartnerNoVATAfter + prismaSupPartnerNoVATAfter;
+  sumWithVATPartner = sumWithVATPartner - supportPartnerWithVAT - implPartnerWithVAT - prismaSupPartnerWithVAT
+    + supportPartnerWithVATAfter + implPartnerWithVATAfter + prismaSupPartnerWithVATAfter;
 
   // перезапишем агрегаты для карточек
   supportFullWithVAT = supportFullWithVATAfter;
@@ -713,11 +852,15 @@ function renderTable(items, totals) {
   const useMod = !!document.getElementById('useModuleDiscount')?.checked;
   const useSup = !!document.getElementById('useSupportDiscount')?.checked;
   const useImp = !!document.getElementById('useImplDiscount')?.checked;
+  const usePrismaSup = !!document.getElementById('usePrismaSupportDiscount')?.checked;
+  const usePrismaLic = !!document.getElementById('usePrismaLicDiscount')?.checked;
 
   const discPct = getDisc('partnerDiscount','usePartnerDiscount');
   const dMod = getDisc('discModules','useModuleDiscount');
   const dSup = getDisc('discSupport','useSupportDiscount');
   const dImp = getDisc('discImpl','useImplDiscount');
+  const dPrismaSup = getDisc('discPrismaSupport','usePrismaSupportDiscount');
+  const dPrismaLic = getDisc('discPrismaLic','usePrismaLicDiscount');
 
   // Таблица: фиксируем компактный набор колонок, чтобы всё влезало в PDF и на экран
   // Всегда показываем только:
@@ -759,6 +902,8 @@ function renderTable(items, totals) {
     if (useMod && it.group === 'license') lineDisc = dMod;
     if (useSup && it.group === 'support') lineDisc = dSup;
     if (useImp && it.group === 'impl') lineDisc = dImp;
+    if (usePrismaLic && it.group === 'prisma_license') lineDisc = dPrismaLic;
+    if (usePrismaSup && it.group === 'prisma_support') lineDisc = dPrismaSup;
 
     // Цена/сумма клиента после применимой скидки (только к своей строке)
     const effUnit = unitBase * (1 - lineDisc);
@@ -971,7 +1116,9 @@ function initListeners(){
   });
 
   // селекты/чекбоксы влияющие на расчёт
-  ['licenseType','supportTier','implOn','useModuleDiscount','useSupportDiscount','useImplDiscount'].forEach(id=>{
+  ['licenseType','supportTier','prismaSupportTier','implOn',
+   'useModuleDiscount','useSupportDiscount','useImplDiscount',
+   'usePrismaSupportDiscount','usePrismaLicDiscount'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     el.addEventListener('change', ()=>{
@@ -982,7 +1129,7 @@ function initListeners(){
   });
 
   // сами значения скидок (когда поле видно)
-  ['discSupport','discImpl'].forEach(id=>{
+  ['discSupport','discImpl','discPrismaSupport','discPrismaLic'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     el.addEventListener('input', recalc);
@@ -1212,7 +1359,7 @@ function toggleSimple(cbId, inputId){
     input.disabled=true;
   }
 }
-['usePartnerDiscount','useModuleDiscount'].forEach(id=>{
+['usePartnerDiscount','useModuleDiscount','usePrismaSupportDiscount','usePrismaLicDiscount'].forEach(id=>{
   const cb=document.getElementById(id);
   if(cb){
     cb.addEventListener('change',()=>{
@@ -1222,6 +1369,8 @@ function toggleSimple(cbId, inputId){
 applyPartnerProfitVisibility();
             applyPartnerProfitVisibility();
 toggleSimple('useModuleDiscount','discModules');
+      toggleSimple('usePrismaSupportDiscount','discPrismaSupport');
+      toggleSimple('usePrismaLicDiscount','discPrismaLic');
       recalc();
           try{updateColumns();}catch(e){}
 });
@@ -1231,6 +1380,8 @@ toggleSimple('usePartnerDiscount','partnerDiscount');
   togglePartnerExtras();
       togglePartnerExtras();
 toggleSimple('useModuleDiscount','discModules');
+toggleSimple('usePrismaSupportDiscount','discPrismaSupport');
+toggleSimple('usePrismaLicDiscount','discPrismaLic');
 
 function applyPartnerProfitVisibility(){
   const cb = document.getElementById('usePartnerDiscount');
@@ -1243,7 +1394,9 @@ function applyPartnerProfitVisibility(){
 function toggleDiscountColumn(){
   const show = (document.getElementById('useModuleDiscount')?.checked ||
                 document.getElementById('useSupportDiscount')?.checked ||
-                document.getElementById('useImplDiscount')?.checked);
+                document.getElementById('useImplDiscount')?.checked ||
+                document.getElementById('usePrismaSupportDiscount')?.checked ||
+                document.getElementById('usePrismaLicDiscount')?.checked);
   const table = document.getElementById('itemsTable');
   if(!table) return;
 
@@ -1267,7 +1420,7 @@ try{
 }catch(e){}
 
 // Update instantly on checkbox change
-['useModuleDiscount','useSupportDiscount','useImplDiscount'].forEach(id=>{
+['useModuleDiscount','useSupportDiscount','useImplDiscount','usePrismaSupportDiscount','usePrismaLicDiscount'].forEach(id=>{
   const cb = document.getElementById(id);
   if(cb) cb.addEventListener('change', toggleDiscountColumn);
 });
