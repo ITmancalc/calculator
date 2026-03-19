@@ -22,6 +22,9 @@ h2{font-size:15px;margin:0 0 10px} label{display:grid;gap:6px;font-size:13px}
 textarea{min-height:80px;resize:vertical} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px} @media(max-width:800px){.row{grid-template-columns:1fr}}
 .chips{display:flex;flex-wrap:wrap;gap:10px} .chip{border:1px solid #1f2937;background:#0b1222;padding:10px 12px;border-radius:12px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex:1;cursor:pointer}
 .chip h4{margin:0;font-size:13px} .muted{color:var(--muted);font-size:12px}
+#itemsTable tfoot .total-cell{vertical-align:top;padding-top:8px;padding-right:0;white-space:nowrap;text-align:right;position:relative;left:-8px}
+#itemsTable tfoot .total-cell .muted{display:block;font-size:11px;line-height:1.15;margin-bottom:2px;text-align:right}
+#itemsTable tfoot .total-cell .mono{display:block;text-align:right}
 .kpi-wrap{display:grid;grid-template-columns:1fr;gap:10px}
 .stat{background:linear-gradient(180deg,#0e1a33,#0b152b);border:1px solid #1f2937;border-radius:14px;padding:12px}
 .stat .label{color:var(--muted);font-size:12px} .stat .value{font-size:20px;font-weight:700} .mono{font-variant-numeric:tabular-nums}
@@ -570,9 +573,9 @@ const PRICING = {
     }
   },
   support: {
-    "Support: Гарантийная": {"100-5000":{price:0,sku:"ITM-DISC-12-TS-GRT-100-5000"},"5001-25000":{price:0,sku:"ITM-DISC-12-TS-GRT-5001-25000"},"25001-50000":{price:0,sku:"ITM-DISC-12-TS-GRT-25001-50000"},"50000+":{price:0,sku:"INF-ITM-12-TS-GRT-50000+"}},
-    "Support: Стандартная": {"100-5000":{price:350,sku:"ITM-DISC-12-TS-STD-100-5000"},"5001-25000":{price:335,sku:"ITM-DISC-12-TS-STD-5001-25000"},"25001-50000":{price:285,sku:"ITM-DISC-12-TS-STD-25001-50000"},"50000+":{price:28400000,sku:"INF-ITM-12-TS-STD-50000+"}},
-    "Support: Расширенная": {"100-5000":{price:545,sku:"ITM-DISC-12-TS-EXT-100-5000"},"5001-25000":{price:490,sku:"ITM-DISC-12-TS-EXT-5001-25000"},"25001-50000":{price:425,sku:"ITM-DISC-12-TS-EXT-25001-50000"},"50000+":{price:42700000,sku:"INF-ITM-12-TS-EXT-50000+"}}
+    "Support: Гарантийная": {"100-5000":{price:0,sku:"ITM-DISC-12-TS-GRT-100-5000"},"5001-25000":{price:0,sku:"ITM-DISC-12-TS-GRT-5001-25000"},"25001-50000":{price:0,sku:"ITM-DISC-12-TS-GRT-25001-50000"}},
+    "Support: Стандартная": {"100-5000":{price:350,sku:"ITM-DISC-12-TS-STD-100-5000"},"5001-25000":{price:335,sku:"ITM-DISC-12-TS-STD-5001-25000"},"25001-50000":{price:285,sku:"ITM-DISC-12-TS-STD-25001-50000"}},
+    "Support: Расширенная": {"100-5000":{price:545,sku:"ITM-DISC-12-TS-EXT-100-5000"},"5001-25000":{price:490,sku:"ITM-DISC-12-TS-EXT-5001-25000"},"25001-50000":{price:425,sku:"ITM-DISC-12-TS-EXT-25001-50000"}}
   }
 };
 
@@ -715,12 +718,11 @@ function buildItems() {
     }
   });
 
-  // Поддержка ИТМен — до 50 000 считается по endpoint, свыше 50 000 идёт фикс Unlim на год
+  // Поддержка — цена за единицу (endpoint), qty=endpoints
   if (supportTier) {
-    const supportRange = endpoints > 50000 ? '50000+' : range;
-    const scfg = PRICING.support[supportTier][supportRange];
+    const scfg = PRICING.support[supportTier][range];
     const supUnitPrice = scfg.price;
-    const supQty = endpoints > 50000 ? 1 : endpoints;
+    const supQty = endpoints;
     items.push({
       group:'support', nomen:'ТП', sku:scfg.sku, name:supportTier,
       qty:supQty, unitPrice:supUnitPrice, vatApplies:true
@@ -938,15 +940,31 @@ function renderTable(items, totals) {
     tbody.appendChild(tr);
   });
 
-  // Перерисуем подвал (компактно, без партнёрских колонок)
-  const tfootHTML = `
-    <tr>
-      <td colspan="${cols.length}">
-        <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-end;align-items:center">
-          <div><span class="muted">Итого без НДС:</span> <span class="mono" id="sumNoVAT">—</span></div>
-          <div><span class="muted">Итого с НДС:</span> <span class="mono" id="sumWithVAT">—</span></div>
-        </div>
-      </td>
+  // Перерисуем подвал
+  const tfootHTML = usePartner ? `
+    <tr class="totals-row">
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="total-cell"><div class="muted">Итого без НДС</div><div class="mono" id="sumNoVAT">—</div></td>
+      <td class="total-cell"><div class="muted">Итого с НДС</div><div class="mono" id="sumWithVAT">—</div></td>
+      <td></td>
+      <td class="total-cell"><div class="muted">Партнёр: итого без НДС</div><div class="mono" id="sumNoVATPartner">—</div></td>
+      <td class="total-cell"><div class="muted">Партнёр: итого с НДС</div><div class="mono" id="sumWithVATPartner">—</div></td>
+    </tr>
+  ` : `
+    <tr class="totals-row">
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="total-cell"><div class="muted">Итого без НДС</div><div class="mono" id="sumNoVAT">—</div></td>
+      <td class="total-cell"><div class="muted">Итого с НДС</div><div class="mono" id="sumWithVAT">—</div></td>
     </tr>
   `;
   if (table.tFoot) table.tFoot.innerHTML = tfootHTML;
@@ -954,6 +972,12 @@ function renderTable(items, totals) {
   // Запишем итоги
   document.getElementById('sumNoVAT').textContent = fmt(totals.sumNoVAT);
   document.getElementById('sumWithVAT').textContent = fmt(totals.sumWithVAT);
+  if (usePartner) {
+    const sumNoVATPartner = document.getElementById('sumNoVATPartner');
+    const sumWithVATPartner = document.getElementById('sumWithVATPartner');
+    if (sumNoVATPartner) sumNoVATPartner.textContent = fmt(totals.sumNoVATPartner);
+    if (sumWithVATPartner) sumWithVATPartner.textContent = fmt(totals.sumWithVATPartner);
+  }
 }
 
 
