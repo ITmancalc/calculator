@@ -573,9 +573,24 @@ const PRICING = {
     }
   },
   support: {
-    "Support: Гарантийная": {"100-5000":{price:0,sku:"ITM-DISC-12-TS-GRT-100-5000"},"5001-25000":{price:0,sku:"ITM-DISC-12-TS-GRT-5001-25000"},"25001-50000":{price:0,sku:"ITM-DISC-12-TS-GRT-25001-50000"}},
-    "Support: Стандартная": {"100-5000":{price:350,sku:"ITM-DISC-12-TS-STD-100-5000"},"5001-25000":{price:335,sku:"ITM-DISC-12-TS-STD-5001-25000"},"25001-50000":{price:285,sku:"ITM-DISC-12-TS-STD-25001-50000"}},
-    "Support: Расширенная": {"100-5000":{price:545,sku:"ITM-DISC-12-TS-EXT-100-5000"},"5001-25000":{price:490,sku:"ITM-DISC-12-TS-EXT-5001-25000"},"25001-50000":{price:425,sku:"ITM-DISC-12-TS-EXT-25001-50000"}}
+    "Support: Гарантийная": {
+      "100-5000":{price:0,sku:"ITM-DISC-12-TS-GRT-100-5000"},
+      "5001-25000":{price:0,sku:"ITM-DISC-12-TS-GRT-5001-25000"},
+      "25001-50000":{price:0,sku:"ITM-DISC-12-TS-GRT-25001-50000"},
+      "50000+":{price:0,sku:"ITM-DISC-12-TS-GRT-50000+"}
+    },
+    "Support: Стандартная": {
+      "100-5000":{price:350,sku:"ITM-DISC-12-TS-STD-100-5000"},
+      "5001-25000":{price:335,sku:"ITM-DISC-12-TS-STD-5001-25000"},
+      "25001-50000":{price:285,sku:"ITM-DISC-12-TS-STD-25001-50000"},
+      "50000+":{price:28400000,sku:"INF-ITM-12-TS-STD-50000+"}
+    },
+    "Support: Расширенная": {
+      "100-5000":{price:545,sku:"ITM-DISC-12-TS-EXT-100-5000"},
+      "5001-25000":{price:490,sku:"ITM-DISC-12-TS-EXT-5001-25000"},
+      "25001-50000":{price:425,sku:"ITM-DISC-12-TS-EXT-25001-50000"},
+      "50000+":{price:42700000,sku:"INF-ITM-12-TS-EXT-50000+"}
+    }
   }
 };
 
@@ -718,11 +733,12 @@ function buildItems() {
     }
   });
 
-  // Поддержка — цена за единицу (endpoint), qty=endpoints
+  // Поддержка — до 50 000 считается за endpoint, свыше 50 000 — фикс Unlim ТП на год
   if (supportTier) {
-    const scfg = PRICING.support[supportTier][range];
+    const supportRange = endpoints > 50000 ? '50000+' : range;
+    const scfg = PRICING.support[supportTier][supportRange];
     const supUnitPrice = scfg.price;
-    const supQty = endpoints;
+    const supQty = endpoints > 50000 ? 1 : endpoints;
     items.push({
       group:'support', nomen:'ТП', sku:scfg.sku, name:supportTier,
       qty:supQty, unitPrice:supUnitPrice, vatApplies:true
