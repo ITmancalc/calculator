@@ -22,9 +22,6 @@ h2{font-size:15px;margin:0 0 10px} label{display:grid;gap:6px;font-size:13px}
 textarea{min-height:80px;resize:vertical} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px} @media(max-width:800px){.row{grid-template-columns:1fr}}
 .chips{display:flex;flex-wrap:wrap;gap:10px} .chip{border:1px solid #1f2937;background:#0b1222;padding:10px 12px;border-radius:12px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex:1;cursor:pointer}
 .chip h4{margin:0;font-size:13px} .muted{color:var(--muted);font-size:12px}
-#itemsTable tfoot .total-cell{vertical-align:top;padding-top:8px;padding-right:0;white-space:nowrap;text-align:right;position:relative;left:-8px}
-#itemsTable tfoot .total-cell .muted{display:block;font-size:11px;line-height:1.15;margin-bottom:2px;text-align:right}
-#itemsTable tfoot .total-cell .mono{display:block;text-align:right}
 .kpi-wrap{display:grid;grid-template-columns:1fr;gap:10px}
 .stat{background:linear-gradient(180deg,#0e1a33,#0b152b);border:1px solid #1f2937;border-radius:14px;padding:12px}
 .stat .label{color:var(--muted);font-size:12px} .stat .value{font-size:20px;font-weight:700} .mono{font-variant-numeric:tabular-nums}
@@ -173,7 +170,8 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 </header>
 <div class="card">
 <div class="btns">
-<button class="btn" id="btnPDF">Скачать PDF</button>
+<button class="btn" id="btnPDF">Скачать КП</button>
+<button class="btn" id="btnTKP">Скачать ТКП</button>
 </div>
 <div class="small">Выгрузка PDF с KPI «Заработок партнёра» (год 1 и 3 года).</div>
 </div>
@@ -213,10 +211,13 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 <label>Наименование клиента
           <input id="clientName" placeholder="ООО «Промресурс»" type="text"/>
 </label>
-</div>
-<div class="row" style="margin-top:10px">
 <label>Менеджер (ФИО)
           <input id="managerName" placeholder="Иванов Иван" type="text"/>
+</label>
+</div>
+<div class="row" style="margin-top:10px">
+<label>Email менеджера
+          <input id="managerEmail" placeholder="manager@company.ru" type="email"/>
 </label>
 <label>Телефон менеджера
           <input id="managerPhone" placeholder="+7 (999) 123-45-67" type="text"/>
@@ -573,24 +574,9 @@ const PRICING = {
     }
   },
   support: {
-    "Support: Гарантийная": {
-      "100-5000":{price:0,sku:"ITM-DISC-12-TS-GRT-100-5000"},
-      "5001-25000":{price:0,sku:"ITM-DISC-12-TS-GRT-5001-25000"},
-      "25001-50000":{price:0,sku:"ITM-DISC-12-TS-GRT-25001-50000"},
-      "50000+":{price:0,sku:"ITM-DISC-12-TS-GRT-50000+"}
-    },
-    "Support: Стандартная": {
-      "100-5000":{price:350,sku:"ITM-DISC-12-TS-STD-100-5000"},
-      "5001-25000":{price:335,sku:"ITM-DISC-12-TS-STD-5001-25000"},
-      "25001-50000":{price:285,sku:"ITM-DISC-12-TS-STD-25001-50000"},
-      "50000+":{price:28400000,sku:"INF-ITM-12-TS-STD-50000+"}
-    },
-    "Support: Расширенная": {
-      "100-5000":{price:545,sku:"ITM-DISC-12-TS-EXT-100-5000"},
-      "5001-25000":{price:490,sku:"ITM-DISC-12-TS-EXT-5001-25000"},
-      "25001-50000":{price:425,sku:"ITM-DISC-12-TS-EXT-25001-50000"},
-      "50000+":{price:42700000,sku:"INF-ITM-12-TS-EXT-50000+"}
-    }
+    "Support: Гарантийная": {"100-5000":{price:0,sku:"ITM-DISC-12-TS-GRT-100-5000"},"5001-25000":{price:0,sku:"ITM-DISC-12-TS-GRT-5001-25000"},"25001-50000":{price:0,sku:"ITM-DISC-12-TS-GRT-25001-50000"}},
+    "Support: Стандартная": {"100-5000":{price:350,sku:"ITM-DISC-12-TS-STD-100-5000"},"5001-25000":{price:335,sku:"ITM-DISC-12-TS-STD-5001-25000"},"25001-50000":{price:285,sku:"ITM-DISC-12-TS-STD-25001-50000"}},
+    "Support: Расширенная": {"100-5000":{price:545,sku:"ITM-DISC-12-TS-EXT-100-5000"},"5001-25000":{price:490,sku:"ITM-DISC-12-TS-EXT-5001-25000"},"25001-50000":{price:425,sku:"ITM-DISC-12-TS-EXT-25001-50000"}}
   }
 };
 
@@ -598,8 +584,8 @@ const PRICING = {
 const PRISMA_PRICING = {
   license: {
     annual: {
-      "100-500":   { price: 315000,  sku: "PRISMA-DATA-12-100-500" },
-      "500-1000":  { price: 630000, sku: "PRISMA-DATA-12-500-1000" },
+      "100-500":   { price: 630000,  sku: "PRISMA-DATA-12-100-500" },
+      "500-1000":  { price: 1050000, sku: "PRISMA-DATA-12-500-1000" },
       "1000-5000": { price: 1750000, sku: "PRISMA-DATA-12-1000-5000" },
       "5000+":     { price: 2625000, sku: "PRISMA-DATA-12-5000+" }
     },
@@ -733,12 +719,11 @@ function buildItems() {
     }
   });
 
-  // Поддержка — до 50 000 считается за endpoint, свыше 50 000 — фикс Unlim ТП на год
+  // Поддержка — цена за единицу (endpoint), qty=endpoints
   if (supportTier) {
-    const supportRange = endpoints > 50000 ? '50000+' : range;
-    const scfg = PRICING.support[supportTier][supportRange];
+    const scfg = PRICING.support[supportTier][range];
     const supUnitPrice = scfg.price;
-    const supQty = endpoints > 50000 ? 1 : endpoints;
+    const supQty = endpoints;
     items.push({
       group:'support', nomen:'ТП', sku:scfg.sku, name:supportTier,
       qty:supQty, unitPrice:supUnitPrice, vatApplies:true
@@ -956,43 +941,33 @@ function renderTable(items, totals) {
     tbody.appendChild(tr);
   });
 
-  // Перерисуем подвал
-  const tfootHTML = usePartner ? `
-    <tr class="totals-row">
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td class="total-cell"><div class="muted">Итого без НДС</div><div class="mono" id="sumNoVAT">—</div></td>
-      <td class="total-cell"><div class="muted">Итого с НДС</div><div class="mono" id="sumWithVAT">—</div></td>
-      <td></td>
-      <td class="total-cell"><div class="muted">Партнёр: итого без НДС</div><div class="mono" id="sumNoVATPartner">—</div></td>
-      <td class="total-cell"><div class="muted">Партнёр: итого с НДС</div><div class="mono" id="sumWithVATPartner">—</div></td>
-    </tr>
-  ` : `
-    <tr class="totals-row">
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td class="total-cell"><div class="muted">Итого без НДС</div><div class="mono" id="sumNoVAT">—</div></td>
-      <td class="total-cell"><div class="muted">Итого с НДС</div><div class="mono" id="sumWithVAT">—</div></td>
-    </tr>
-  `;
+  // Перерисуем подвал: "Итого" и суммы строго под профильными колонками
+  const byKey = (k) => cols.findIndex(c => c.k === k);
+  const idxNoVat = byKey('noVat');
+  const idxWithVat = byKey('withVat');
+  const idxPNoVat = byKey('pNoVat');
+  const idxPWithVat = byKey('pWithVat');
+  const idxLabel = Math.max(0, idxNoVat - 1);
+
+  const tfootCells = cols.map((_, i) => {
+    if (i === idxLabel) return `<td class="right"><strong>Итого:</strong></td>`;
+    if (i === idxNoVat) return `<td class="right"><strong id="sumNoVAT">—</strong></td>`;
+    if (i === idxWithVat) return `<td class="right"><strong id="sumWithVAT">—</strong></td>`;
+    if (usePartner && i === idxPNoVat) return `<td class="right"><strong id="sumNoVATPartner">—</strong></td>`;
+    if (usePartner && i === idxPWithVat) return `<td class="right"><strong id="sumWithVATPartner">—</strong></td>`;
+    return '<td></td>';
+  }).join('');
+  const tfootHTML = `<tr>${tfootCells}</tr>`;
   if (table.tFoot) table.tFoot.innerHTML = tfootHTML;
 
   // Запишем итоги
   document.getElementById('sumNoVAT').textContent = fmt(totals.sumNoVAT);
   document.getElementById('sumWithVAT').textContent = fmt(totals.sumWithVAT);
   if (usePartner) {
-    const sumNoVATPartner = document.getElementById('sumNoVATPartner');
-    const sumWithVATPartner = document.getElementById('sumWithVATPartner');
-    if (sumNoVATPartner) sumNoVATPartner.textContent = fmt(totals.sumNoVATPartner);
-    if (sumWithVATPartner) sumWithVATPartner.textContent = fmt(totals.sumWithVATPartner);
+    const n = document.getElementById('sumNoVATPartner');
+    const w = document.getElementById('sumWithVATPartner');
+    if (n) n.textContent = fmt(totals.sumNoVATPartner);
+    if (w) w.textContent = fmt(totals.sumWithVATPartner);
   }
 }
 
@@ -1264,6 +1239,9 @@ const today = new Date().toLocaleDateString('ru-RU');
           <div><strong>Дата составления:</strong> ${today}</div>
           <div><strong>Менеджер:</strong> ${escapeHtml(document.getElementById('managerName').value||'—')}</div>
           <div><strong>Телефон:</strong> ${escapeHtml(document.getElementById('managerPhone').value||'—')}</div>
+          ${((document.getElementById('managerEmail')?.value || '').trim())
+            ? `<div style="padding:6px 10px;border:1px solid #0f766e;background:#ecfeff;border-radius:8px;"><strong>Email:</strong> ${escapeHtml((document.getElementById('managerEmail').value || '').trim())}</div>`
+            : ``}
           <div><strong>Клиент:</strong> ${escapeHtml(valOrDash('clientName'))}</div>
           ${showPartnerInPdf ? `<div><strong>Партнёр:</strong> ${escapeHtml(valOrDash('partnerName'))}</div>
           <div><strong>Партнёрская скидка:</strong> ${partnerDiscount}</div>` : ``}
@@ -1379,11 +1357,373 @@ function escapeHtml(str){
   return (str||'').replace(/[&<>"']/g, s => map[s]);
 }
 
+const TKP_MODULE_CONTENT = {
+  "Базовый": {
+    title: "Базовый модуль (входит по умолчанию)",
+    info: "Фундамент системы, обеспечивает полный цикл работы с ИТ-активами: от дискаверинга и инвентаризации до аналитики и контроля изменений.",
+    functions: [
+      "Дискаверинг неизвестных IP (ICMP, ARP, LLDP, SSDP)",
+      "Агентская и безагентская инвентаризация",
+      "История изменений устройств и ПО",
+      "Контроль состояния конечных точек",
+      "Настраиваемые оповещения о критичных изменениях",
+      "Кросплатформенность: Windows, Linux (включая отечественные ОС)",
+      "Прокси-шлюзы и обратная синхронизация для работы в распределенных и изолированных сетях",
+      "Веб-интерфейс, конструктор отчетов и email-рассылки по расписанию",
+      "Импорт данных из гипервизоров (Rest API), служб каталогов (LDAP/LDAPs)",
+      "Сбор информации из СУБД (SQL-запросы)",
+      "Удаленное управление агентами"
+    ],
+    benefits: [
+      "Полная видимость инфраструктуры и отсутствие теневых устройств",
+      "Снижение затрат на закупки и сопровождение оборудования",
+      "Контроль изменений и раннее планирование замены/апгрейда",
+      "Работа в любой сетевой архитектуре, включая закрытые сегменты и DMZ",
+      "Соответствие требованиям ИБ: шифрование, парольные политики, защищенные подключения",
+      "Актуальная база активов для управленцев и аудиторов"
+    ]
+  },
+  "Модель данных": {
+    title: "Гибкая модель данных (дополнительный модуль)",
+    info: "Позволяет оперативно адаптировать систему под любой объем собираемых данных и создавать нестандартные задачи без заказной разработки.",
+    functions: [
+      "Конструктор конфигураций объектов и их атрибутов",
+      "Редактор сенсоров (PowerShell, WMI, Shell, SQL, SNMP, IPMI, Rest API)",
+      "Настройка мапинга собираемых данных по отдельным полям",
+      "Кастомизация карточек устройств",
+      "Агрегация и дедупликация данных из нескольких источников"
+    ],
+    benefits: [
+      "Быстрая адаптация под специфическое оборудование на Linux/Unix",
+      "Инвентаризация устройств на устаревших ОС",
+      "Гибкая адаптация объема данных под выданные права",
+      "Быстрое закрытие входящих задач без ожидания релизов вендора",
+      "Экономия на заказной разработке за счет no-code конструкторов",
+      "Независимость от вендора при добавлении сенсоров и источников"
+    ]
+  },
+  "Обогащение ПО": {
+    title: "Обогащение ПО (дополнительный модуль)",
+    info: "Фокус на управление программным обеспечением: контроль лицензионной чистоты, предотвращение использования запрещенных приложений, поддержка SAM.",
+    functions: [
+      "Редактор справочников обогащения ПО",
+      "Редактор правил распознавания ненормализованного ПО",
+      "Связь устройств с нормализованными данными о ПО и лицензионными метриками",
+      "Экспорт/импорт правил распознавания и обогащения ПО",
+      "API для обмена данными с ITSM-системами",
+      "Учет статистики работы ПО, включая конкурентное использование",
+      "Категорирование и фильтрация ПО в конструкторе отчетов",
+      "Подключение библиотеки ПО (Призма данных)"
+    ],
+    benefits: [
+      "Поддержка полноценного SAM-подхода",
+      "Нормализация и сокращение дублей конфигурационных единиц ПО",
+      "Оценка эффективности использования установленного ПО",
+      "Снижение затрат на неиспользуемые лицензии",
+      "Минимизация рисков при проверках лицензионной чистоты",
+      "Контроль нежелательного ПО",
+      "Сокращение ручного труда при подготовке отчетов"
+    ]
+  },
+  "Призма данных": {
+    title: "Призма данных",
+    info: "Информация по модулю 'Призма данных' в вашем ТКП вынесена в отдельные блоки прайсинга и поддержки. В документ включаются выбранные расчетные позиции.",
+    functions: [
+      "Лицензирование и поддержка рассчитываются отдельными позициями",
+      "Диапазон и артикул определяются по количеству конечных точек",
+      "Данные включаются в общую спецификацию ТКП"
+    ],
+    benefits: [
+      "Прозрачная стоимость и прогнозируемость затрат",
+      "Единая структура КП и ТКП для согласования с клиентом"
+    ]
+  }
+};
+const TKP_LOGO_DATA_URL = 'data:image/png;base64,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...AAAABklEQVQDAItZIErs2sNHAAAAAElFTkSuQmCC';
+
+function getSelectedModules(){
+  return Array.from(document.querySelectorAll('#modules .chip'))
+    .filter(ch => ch.dataset.active === '1')
+    .map(ch => (ch.querySelector('h4')?.textContent || '').trim())
+    .filter(Boolean);
+}
+
+function renderTkpClassicPage(host, contentHtml, pageNo, totalPages, logoSrc){
+  const managerRaw = document.getElementById('managerName')?.value || '—';
+  const phoneRaw = document.getElementById('managerPhone')?.value || '—';
+  const emailRaw = (document.getElementById('managerEmail')?.value || '').trim();
+  const manager = escapeHtml(managerRaw);
+  const phone = escapeHtml(phoneRaw);
+  const email = escapeHtml(emailRaw);
+  const page = document.createElement('div');
+  page.className = 'a3page';
+  page.style.background = '#fff';
+  page.style.width = '1754px';
+  page.style.height = '1240px';
+  const inner = document.createElement('div');
+  inner.className = 'page-inner';
+  inner.style.padding = '42px 54px 78px 54px';
+  inner.style.gap = '10px';
+  inner.style.fontFamily = 'Arial, Helvetica, sans-serif';
+  inner.style.color = '#111';
+  inner.style.display = 'block';
+  const contactLine = emailRaw ? `${phone}  |  ${email}` : phone;
+  inner.innerHTML = `
+    <div style="font-size:42px;font-weight:700;line-height:1.16;margin:10px 0 22px 0;">ИТМен: функциональность по модулям и бизнес-задачи</div>
+    ${contentHtml}
+    <div style="position:absolute;left:56px;right:56px;bottom:30px;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;line-height:1.25;">
+        <div><strong>Исп.:</strong> ${manager},</div>
+        <div>${contactLine}</div>
+      </div>
+      <div style="font-size:16px;color:#333;">-- ${pageNo} of ${totalPages} --</div>
+    </div>
+  `;
+  const finalLogoSrc = logoSrc || document.querySelector('.ui-topright-logo img')?.src || document.querySelector('img[alt="Инферит"]')?.src || '';
+  if (finalLogoSrc) {
+    const logoWrap = document.createElement('div');
+    logoWrap.style.display = 'flex';
+    logoWrap.style.justifyContent = 'flex-start';
+    logoWrap.style.alignItems = 'center';
+    logoWrap.style.margin = '0 0 18px 0';
+    logoWrap.style.minHeight = '92px';
+    const logoClone = document.createElement('img');
+    logoClone.setAttribute('src', finalLogoSrc);
+    logoClone.setAttribute('alt', 'Инферит ИТМен');
+    logoClone.style.height = '92px';
+    logoClone.style.maxWidth = '620px';
+    logoClone.style.objectFit = 'contain';
+    logoClone.style.display = 'block';
+    logoWrap.appendChild(logoClone);
+    inner.prepend(logoWrap);
+  }
+  page.appendChild(inner);
+  host.appendChild(page);
+}
+
+function buildTkpPriceTableHtml(items, totals){
+  const usePartner = !!document.getElementById('usePartnerDiscount')?.checked;
+  const discPct = getDisc('partnerDiscount','usePartnerDiscount');
+  const dMod = getDisc('discModules','useModuleDiscount');
+  const dSup = getDisc('discSupport','useSupportDiscount');
+  const dImp = getDisc('discImpl','useImplDiscount');
+  const dPrismaSup = getDisc('discPrismaSupport','usePrismaSupportDiscount');
+  const dPrismaLic = getDisc('discPrismaLic','usePrismaLicDiscount');
+
+  const rows = items.map(it => {
+    let lineDisc = 0;
+    if (it.group === 'license') lineDisc = dMod;
+    if (it.group === 'support') lineDisc = dSup;
+    if (it.group === 'impl') lineDisc = dImp;
+    if (it.group === 'prisma_license') lineDisc = dPrismaLic;
+    if (it.group === 'prisma_support') lineDisc = dPrismaSup;
+
+    const effUnit = it.unitPrice * (1 - lineDisc);
+    const subtotal = effUnit * it.qty;
+    const vat = it.vatApplies ? subtotal * VAT : 0;
+    const withVat = subtotal + vat;
+    const partnerUnit = usePartner ? (it.group === 'impl' ? effUnit : effUnit * (1 - discPct)) : 0;
+    const partnerSubtotal = usePartner ? partnerUnit * it.qty : 0;
+    const partnerVat = (usePartner && it.vatApplies) ? partnerSubtotal * VAT : 0;
+    const partnerWithVat = usePartner ? partnerSubtotal + partnerVat : 0;
+    return `
+      <tr>
+        <td style="padding:8px 10px;border:1px solid #666;">${escapeHtml(it.nomen || '—')}</td>
+        <td style="padding:8px 10px;border:1px solid #666;">${escapeHtml(it.sku || '—')}</td>
+        <td style="padding:8px 10px;border:1px solid #666;">${escapeHtml(it.name || '—')}</td>
+        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${it.qty}</td>
+        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(effUnit)}</td>
+        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(subtotal)}</td>
+        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(withVat)}</td>
+        ${usePartner ? `<td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(partnerSubtotal)}</td>` : ''}
+        ${usePartner ? `<td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(partnerWithVat)}</td>` : ''}
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.25;color:#111;table-layout:fixed;">
+      <colgroup>
+        <col style="width:${usePartner ? '12' : '14'}%">
+        <col style="width:${usePartner ? '20' : '22'}%">
+        <col style="width:${usePartner ? '18' : '23'}%">
+        <col style="width:7%">
+        <col style="width:9%">
+        <col style="width:${usePartner ? '11' : '12'}%">
+        <col style="width:${usePartner ? '11' : '12'}%">
+        ${usePartner ? '<col style="width:6%"><col style="width:6%">' : ''}
+      </colgroup>
+      <thead>
+        <tr style="background:#f2f2f2;">
+          <th style="padding:8px 10px;border:1px solid #666;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Номенклатура</th>
+          <th style="padding:8px 10px;border:1px solid #666;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Артикул</th>
+          <th style="padding:8px 10px;border:1px solid #666;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Наименование</th>
+          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Кол-во</th>
+          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Цена</th>
+          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Сумма без НДС</th>
+          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Сумма с НДС</th>
+          ${usePartner ? '<th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-size:12px;line-height:1.2;color:#111;font-weight:700;">Партнер сумма без НДС</th>' : ''}
+          ${usePartner ? '<th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-size:12px;line-height:1.2;color:#111;font-weight:700;">Партнер сумма с НДС</th>' : ''}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td style="padding:10px;border:1px solid #666;"></td>
+          <td style="padding:10px;border:1px solid #666;"></td>
+          <td style="padding:10px;border:1px solid #666;"></td>
+          <td style="padding:10px;border:1px solid #666;"></td>
+          <td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">Итого:</td>
+          <td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumNoVAT)}</td>
+          <td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumWithVAT)}</td>
+          ${usePartner ? `<td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumNoVATPartner)}</td>` : ''}
+          ${usePartner ? `<td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumWithVATPartner)}</td>` : ''}
+        </tr>
+      </tfoot>
+    </table>
+  `;
+}
+
+async function waitForImagesReady(root){
+  const imgs = Array.from(root.querySelectorAll('img'));
+  const waits = imgs.map(img => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise(resolve => {
+      const done = () => resolve();
+      img.addEventListener('load', done, { once: true });
+      img.addEventListener('error', done, { once: true });
+    });
+  });
+  await Promise.all(waits);
+}
+
+async function resolveTkpLogoSrc(){
+  const src = document.querySelector('.ui-topright-logo img')?.src || document.querySelector('img[alt="Инферит"]')?.src || '';
+  if (!src) return '';
+  if (src.startsWith('data:image/png')) return src;
+  try {
+    const img = new Image();
+    await new Promise((resolve) => {
+      const done = () => resolve();
+      img.onload = done;
+      img.onerror = done;
+      img.src = src;
+    });
+    if (!img.naturalWidth || !img.naturalHeight) return src;
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    if (!ctx) return src;
+    ctx.drawImage(img, 0, 0);
+    return c.toDataURL('image/png');
+  } catch(e) {
+    return src;
+  }
+}
+
+
+function setupTKP() {
+  const btn = document.getElementById('btnTKP');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    try {
+      const items = buildItems();
+      const totals = computeTotals(items);
+      renderTable(items, totals);
+
+      const printHost = document.getElementById('printDoc');
+      printHost.innerHTML = '';
+      const selectedModules = getSelectedModules();
+      const pages = [];
+      selectedModules.forEach(moduleName => {
+        const mod = TKP_MODULE_CONTENT[moduleName];
+        if (!mod) return;
+        pages.push(`
+        <div style="font-size:30px;font-weight:700;margin:8px 0 14px 0;">${escapeHtml(mod.title)}</div>
+        <div style="font-size:20px;line-height:1.45;margin-bottom:14px;"><strong>Общая информация:</strong><br>${escapeHtml(mod.info)}</div>
+        <div style="font-size:24px;font-weight:700;margin:8px 0;">Функции:</div>
+        <ul style="margin:0 0 14px 0;padding-left:24px;font-size:19px;line-height:1.45;">
+            ${mod.functions.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+          </ul>
+        <div style="font-size:24px;font-weight:700;margin:8px 0;">Бизнес-выгоды:</div>
+        <ul style="margin:0;padding-left:24px;font-size:19px;line-height:1.45;">
+            ${mod.benefits.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+          </ul>
+        `);
+      });
+
+      // ТП всегда включается в ТКП, независимо от выбранных модулей
+      pages.push(`
+        <div style="font-size:30px;font-weight:700;margin:8px 0 14px 0;">Техническая поддержка «Инферит ИТМен»</div>
+        <div style="font-size:20px;line-height:1.45;">Доступны следующие пакеты технической поддержки: Базовый (гарантийный), Стандартный и Расширенный.</div>
+        <div style="font-size:24px;font-weight:700;margin-top:12px;">Базовый (гарантийный)</div>
+        <ul style="padding-left:24px;font-size:19px;line-height:1.42;">
+          <li>Количество обращений: без ограничений.</li>
+          <li>Каналы приема обращений: портал, e-mail.</li>
+          <li>Режим приема обращений: 24x7.</li>
+          <li>Режим решения обращений: 9:00-18:00 (МСК) в рабочие дни.</li>
+          <li>Доступ к обновлениям продукта (включая обновления безопасности).</li>
+          <li>Доступ к базе знаний (Wiki) и системе отслеживания ошибок (BugTracker).</li>
+        </ul>
+        <div style="font-size:24px;font-weight:700;">Стандартный</div>
+        <ul style="padding-left:24px;font-size:19px;line-height:1.42;">
+          <li>Все возможности Базового пакета.</li>
+          <li>Моделирование проблемы на стенде службы ТП (при наличии технической возможности).</li>
+          <li>Обучение: до 50 обращений в год.</li>
+        </ul>
+        <div style="font-size:24px;font-weight:700;">Расширенный</div>
+        <ul style="padding-left:24px;font-size:19px;line-height:1.42;">
+          <li>Все возможности Стандартного пакета.</li>
+          <li>Удаленное подключение к инфраструктуре пользователя для анализа проблемы (до 100 обращений в год).</li>
+          <li>Проведение видеоконференцсвязи (до 100 обращений в год).</li>
+          <li>Обучение: до 100 обращений в год.</li>
+        </ul>
+      `);
+
+      const tblHtml = buildTkpPriceTableHtml(items, totals);
+      pages.push(`
+        <div style="font-size:30px;font-weight:700;margin:8px 0 14px 0;">Пример расчета стоимости проекта</div>
+        <div style="font-size:19px;margin-bottom:12px;">(автоматически сформировано по выбранным параметрам калькулятора)</div>
+        <div style="font-size:20px;">${tblHtml}</div>
+      `);
+
+      const totalPages = pages.length;
+      const tkpLogoSrc = (await resolveTkpLogoSrc()) || TKP_LOGO_DATA_URL || '';
+      pages.forEach((html, idx) => renderTkpClassicPage(printHost, html, idx + 1, totalPages, tkpLogoSrc));
+      await waitForImagesReady(printHost);
+
+      const jsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
+      if (!jsPDF) throw new Error('jsPDF не найден');
+
+      const pdf = new jsPDF({orientation:'landscape', unit:'pt', format:'a4', compress:true});
+      const pageNodes = Array.from(printHost.querySelectorAll('.a3page'));
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+
+      for (let i = 0; i < pageNodes.length; i += 1) {
+        const canvas = await html2canvas(pageNodes[i], {scale:2, useCORS:true, backgroundColor:'#ffffff'});
+        const imgData = canvas.toDataURL('image/jpeg', 0.84);
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+      }
+
+      pdf.save('TKP_ITMen.pdf');
+    } catch (e) {
+      alert('Ошибка формирования ТКП: ' + e.message);
+      console.error(e);
+    }
+  });
+}
+
 fillSupportTiers();
 initModules();
 initListeners();
 recalc();
 setupPDF();
+setupTKP();
 
 
 function toggleSimple(cbId, inputId){
@@ -1446,7 +1786,7 @@ function toggleDiscountColumn(){
   if(idx === -1) return;
   const col = idx + 1;
 
-  table.querySelectorAll(`thead th:nth-child(${col}), tbody td:nth-child(${col})`).forEach(el=>{
+  table.querySelectorAll(`thead th:nth-child(${col}), tbody td:nth-child(${col}), tfoot td:nth-child(${col}), tfoot th:nth-child(${col})`).forEach(el=>{
     el.style.display = show ? '' : 'none';
   });
 }
