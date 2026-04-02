@@ -17,8 +17,9 @@ header{display:flex;gap:12px;align-items:center;margin-bottom:16px} h1{font-size
 .grid{display:grid;grid-template-columns:1.05fr .95fr;gap:14px} @media(max-width:980px){.grid{grid-template-columns:1fr}}
 .card{}
 h2{font-size:15px;margin:0 0 10px} label{display:grid;gap:6px;font-size:13px}
-.card input,.card select,.card textarea{width:100%;padding:12px;border-radius:12px;border:1px solid #243043;background:#0b1222;color:var(--text)}
-.card input:focus,.card select:focus,.card textarea:focus{outline:none;box-shadow:0 0 0 3px #0891b233;border-color:#1e293b}
+.card input:not([type=checkbox]):not([type=radio]),.card select,.card textarea{width:100%;padding:12px;border-radius:12px;border:1px solid #243043;background:#0b1222;color:var(--text)}
+.card input:not([type=checkbox]):not([type=radio]):focus,.card select:focus,.card textarea:focus{outline:none;box-shadow:0 0 0 3px #0891b233;border-color:#1e293b}
+.card input[type=checkbox],.card input[type=radio]{width:auto;min-width:1.1em;height:1.1em;margin:0;accent-color:var(--mint);vertical-align:middle;flex-shrink:0}
 textarea{min-height:80px;resize:vertical} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px} @media(max-width:800px){.row{grid-template-columns:1fr}}
 .chips{display:flex;flex-wrap:wrap;gap:10px} .chip{border:1px solid #1f2937;background:#0b1222;padding:10px 12px;border-radius:12px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex:1;cursor:pointer}
 .chip h4{margin:0;font-size:13px} .muted{color:var(--muted);font-size:12px}
@@ -170,8 +171,13 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 </header>
 <div class="card">
 <div class="btns">
-<button class="btn" id="btnPDF">Скачать КП</button>
-<button class="btn" id="btnTKP">Скачать ТКП</button>
+<button class="btn" id="btnPDF">Скачать</button>
+<button class="btn" id="btnTKP" style="display:none">Скачать ТКП</button>
+</div>
+<div class="row" style="margin-top:10px">
+<label>Шаблон
+          <select id="templateSelect"></select>
+</label>
 </div>
 <div class="small">Выгрузка PDF с KPI «Заработок партнёра» (год 1 и 3 года).</div>
 </div>
@@ -413,6 +419,7 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 <div class="print-doc" id="printDoc"></div>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
 <script>
 // --- Partner discount PIN gate (lightweight protection) ---
 // NOTE: This is a UI guard only. In a single-file HTML, the PIN can be found in the source by a determined user.
@@ -1167,11 +1174,396 @@ function initListeners(){
 
 
 function valOrDash(id){ const el=document.getElementById(id); return el && 'value' in el ? (el.value||'—') : '—'; }
+
+const TEMPLATE_STATE = {
+  kp: [],
+  tkp: [],
+  selected: { kp: '', tkp: '' },
+  selectedType: 'kp'
+};
+const REMOTE_TEMPLATE_REGISTRY_URL = 'https://script.google.com/macros/s/AKfycbxUqSqRvRjwXpgtyS1gpp2gmcGetcsHqUAwNc71L_74o5j5Fc6gNw7UA04bPFRYRX-2Bg/exec';
+const USE_REMOTE_TEMPLATE_REGISTRY = true;
+
+function normalizeTemplateList(list, docType){
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(it => it && typeof it === 'object' && it.id && it.name && it.file)
+    .map(it => ({
+      id: String(it.id),
+      name: String(it.name),
+      file: String(it.file),
+      isDefault: !!it.isDefault,
+      docType,
+      assetType: String(it.assetType || it.type || '').toLowerCase()
+    }));
+}
+
+/** option value = docType + ':' + id. Если id — URL, в нём много ':'; split(':') ломает выбор шаблона. */
+function parseTemplateSelectValue(v){
+  const s = String(v || '');
+  const i = s.indexOf(':');
+  if (i < 1) return null;
+  const type = s.slice(0, i);
+  const id = s.slice(i + 1);
+  if ((type !== 'kp' && type !== 'tkp') || !id) return null;
+  return { type, id };
+}
+
+function setTemplateOptions(){
+  const sel = document.getElementById('templateSelect');
+  if (!sel) return;
+  const list = [
+    ...(TEMPLATE_STATE.kp || []),
+    ...(TEMPLATE_STATE.tkp || [])
+  ];
+  sel.innerHTML = '<option value="">Встроенный (КП по умолчанию)</option>' +
+    list.map(t => `<option value="${escapeHtml(t.docType + ':' + t.id)}">[${t.docType.toUpperCase()}] ${escapeHtml(t.name)}</option>`).join('');
+  const preferredTpl = list.find(t => t.isDefault) || null;
+  const preferred = preferredTpl ? `${preferredTpl.docType}:${preferredTpl.id}` : '';
+  sel.value = preferred;
+  if (preferredTpl) {
+    TEMPLATE_STATE.selectedType = preferredTpl.docType;
+    TEMPLATE_STATE.selected.kp = preferredTpl.docType === 'kp' ? preferredTpl.id : '';
+    TEMPLATE_STATE.selected.tkp = preferredTpl.docType === 'tkp' ? preferredTpl.id : '';
+  } else {
+    TEMPLATE_STATE.selectedType = 'kp';
+    TEMPLATE_STATE.selected.kp = '';
+    TEMPLATE_STATE.selected.tkp = '';
+  }
+}
+
+async function loadTemplateRegistry(){
+  let cfg = null;
+  if (USE_REMOTE_TEMPLATE_REGISTRY) {
+    try {
+      const rr = await fetch(REMOTE_TEMPLATE_REGISTRY_URL, { cache: 'no-store' });
+      if (!rr.ok) throw new Error('remote registry not found');
+      cfg = await rr.json();
+    } catch(e) {}
+  }
+  if (!cfg) {
+    try{
+      const r = await fetch('templates/index.json', { cache: 'no-store' });
+      if (!r.ok) throw new Error('index.json not found');
+      cfg = await r.json();
+    }catch(e){}
+  }
+  if (cfg) {
+    TEMPLATE_STATE.kp = normalizeTemplateList(cfg.kp, 'kp');
+    TEMPLATE_STATE.tkp = normalizeTemplateList(cfg.tkp, 'tkp');
+  } else {
+    TEMPLATE_STATE.kp = [];
+    TEMPLATE_STATE.tkp = [];
+  }
+  setTemplateOptions();
+}
+
+async function initTemplateUI(){
+  const sel = document.getElementById('templateSelect');
+  if (sel) {
+    sel.addEventListener('change', () => {
+      const v = sel.value || '';
+      TEMPLATE_STATE.selected.kp = '';
+      TEMPLATE_STATE.selected.tkp = '';
+      TEMPLATE_STATE.selectedType = 'kp';
+      const parsed = parseTemplateSelectValue(v);
+      if (!parsed) return;
+      TEMPLATE_STATE.selectedType = parsed.type;
+      TEMPLATE_STATE.selected[parsed.type] = parsed.id;
+    });
+  }
+  await loadTemplateRegistry();
+}
+
+function renderTemplateString(html, ctx){
+  return String(html || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => (ctx[key] ?? ''));
+}
+
+function buildModuleSectionsHtml(){
+  const selectedModules = getSelectedModules();
+  return selectedModules.map(moduleName => {
+    const mod = TKP_MODULE_CONTENT[moduleName];
+    if (!mod) return '';
+    return `
+      <section style="margin:14px 0 18px 0;">
+        <h2 style="font-size:32px;margin:0 0 10px 0;">${escapeHtml(mod.title)}</h2>
+        <p style="font-size:22px;line-height:1.4;margin:0 0 10px 0;"><strong>Общая информация:</strong> ${escapeHtml(mod.info)}</p>
+        <h3 style="font-size:26px;margin:10px 0 6px 0;">Функции</h3>
+        <ul style="font-size:20px;line-height:1.4;margin:0 0 10px 0;padding-left:24px;">
+          ${mod.functions.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+        </ul>
+        <h3 style="font-size:26px;margin:10px 0 6px 0;">Бизнес-выгоды</h3>
+        <ul style="font-size:20px;line-height:1.4;margin:0;padding-left:24px;">
+          ${mod.benefits.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
+        </ul>
+      </section>
+    `;
+  }).join('');
+}
+
+function buildTemplateContext(type, items, totals){
+  const managerName = escapeHtml(document.getElementById('managerName')?.value || '—');
+  const managerPhone = escapeHtml(document.getElementById('managerPhone')?.value || '—');
+  const managerEmail = escapeHtml((document.getElementById('managerEmail')?.value || '').trim());
+  const clientName = escapeHtml(document.getElementById('clientName')?.value || '—');
+  const licenseType = escapeHtml(document.getElementById('licenseType')?.selectedOptions?.[0]?.textContent || '—');
+  const supportTier = escapeHtml(document.getElementById('supportTier')?.value || '—');
+  const endpoints = escapeHtml(document.getElementById('endpoints')?.value || '—');
+  const today = new Date().toLocaleDateString('ru-RU');
+  const tableHtml = type === 'tkp' ? buildTkpPriceTableHtml(items, totals) : document.getElementById('itemsTable')?.outerHTML || '';
+  return {
+    today,
+    manager_name: managerName,
+    manager_phone: managerPhone,
+    manager_email: managerEmail,
+    client_name: clientName,
+    license_type: licenseType,
+    support_tier: supportTier,
+    endpoints,
+    total_no_vat: fmt(totals.sumNoVAT),
+    total_with_vat: fmt(totals.sumWithVAT),
+    total_partner_no_vat: fmt(totals.sumNoVATPartner),
+    total_partner_with_vat: fmt(totals.sumWithVATPartner),
+    table_html: tableHtml,
+    module_sections: buildModuleSectionsHtml()
+  };
+}
+
+function getTemplateAssetType(file, tpl){
+  const fromMeta = String(tpl?.assetType || '').toLowerCase();
+  if (fromMeta === 'html' || fromMeta === 'pdf' || fromMeta === 'image') return fromMeta;
+  const clean = String(file || '').split('?')[0].toLowerCase();
+  if (clean.endsWith('.html') || clean.endsWith('.htm')) return 'html';
+  if (clean.endsWith('.pdf')) return 'pdf';
+  if (clean.endsWith('.jpg') || clean.endsWith('.jpeg') || clean.endsWith('.png') || clean.endsWith('.webp')) return 'image';
+  return 'unknown';
+}
+
+function decodeBase64ToUint8Array(base64){
+  const binary = atob(String(base64 || ''));
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function decodeBase64ToText(base64){
+  const bytes = decodeBase64ToUint8Array(base64);
+  const dec = new TextDecoder('utf-8');
+  return dec.decode(bytes);
+}
+
+async function fetchTemplatePayload(fileUrl){
+  const r = await fetch(fileUrl, { cache: 'no-store' });
+  if (!r.ok) throw new Error('template fetch failed');
+  const ct = String(r.headers.get('content-type') || '').toLowerCase();
+  if (ct.includes('application/json') || ct.includes('text/plain')) {
+    const txt = await r.text();
+    let j = null;
+    try { j = JSON.parse(txt); } catch(e) {}
+    if (j && j.base64 && j.mimeType) {
+      return { mode: 'base64', base64: j.base64, mimeType: String(j.mimeType || '') };
+    }
+    return { mode: 'text', text: txt };
+  }
+  return { mode: 'arrayBuffer', buffer: await r.arrayBuffer(), mimeType: ct };
+}
+
+function makeTemplateOverlayHtml(type, ctx, pageNo){ return ''; }
+
+function getSelectedTemplate(type){
+  const selectedId = TEMPLATE_STATE.selected[type] || '';
+  if (!selectedId) return null;
+  const list = TEMPLATE_STATE[type] || [];
+  return list.find(t => t.id === selectedId) || null;
+}
+
+async function loadTemplateBackgroundImages(tpl){
+  if (!tpl || !tpl.file) return [];
+  const assetType = getTemplateAssetType(tpl.file, tpl);
+  if (assetType === 'unknown' || assetType === 'html') return [];
+  if (assetType === 'image') {
+    try {
+      const payload = await fetchTemplatePayload(tpl.file);
+      if (payload.mode === 'base64') return [`data:${payload.mimeType || 'image/png'};base64,${payload.base64}`];
+      return [tpl.file];
+    } catch(e) {
+      return [tpl.file];
+    }
+  }
+  if (assetType === 'pdf') {
+    if (!window.pdfjsLib) return [];
+    const pdfjsLib = window.pdfjsLib;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js';
+    let ab = null;
+    try {
+      const payload = await fetchTemplatePayload(tpl.file);
+      if (payload.mode === 'base64') ab = decodeBase64ToUint8Array(payload.base64).buffer;
+      else if (payload.mode === 'arrayBuffer') ab = payload.buffer;
+    } catch(e) {
+      console.warn('ТКП: не удалось загрузить PDF шаблона', tpl?.file, e);
+    }
+    if (!ab) return [];
+    const pdfDoc = await pdfjsLib.getDocument({ data: ab }).promise;
+    if (pdfDoc.numPages < 1) return [];
+    // Одна эталонная страница PDF — макет «как должно выглядеть»; её же подкладываем под каждую страницу с модулями и ТП.
+    const page = await pdfDoc.getPage(1);
+    const vp = page.getViewport({ scale: 2.75 });
+    const c = document.createElement('canvas');
+    c.width = vp.width; c.height = vp.height;
+    await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    return [c.toDataURL('image/jpeg', 0.92)];
+  }
+  return [];
+}
+
+async function renderTemplateAssetPages(type, tpl, ctx, printHost){
+  const assetType = getTemplateAssetType(tpl.file, tpl);
+  if (assetType === 'unknown') return false;
+  if (assetType === 'html') return null;
+
+  let bgImages = [];
+  if (assetType === 'image') {
+    try {
+      const payload = await fetchTemplatePayload(tpl.file);
+      if (payload.mode === 'base64') {
+        bgImages = [`data:${payload.mimeType || 'image/png'};base64,${payload.base64}`];
+      } else {
+        bgImages = [tpl.file];
+      }
+    } catch(e) {
+      bgImages = [tpl.file];
+    }
+  } else if (assetType === 'pdf') {
+    if (!window.pdfjsLib) return false;
+    const pdfjsLib = window.pdfjsLib;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js';
+    let ab = null;
+    try {
+      const payload = await fetchTemplatePayload(tpl.file);
+      if (payload.mode === 'base64') {
+        ab = decodeBase64ToUint8Array(payload.base64).buffer;
+      } else if (payload.mode === 'arrayBuffer') {
+        ab = payload.buffer;
+      } else {
+        return false;
+      }
+    } catch (e) {
+      return false;
+    }
+    const pdfDoc = await pdfjsLib.getDocument({ data: ab }).promise;
+    for (let p = 1; p <= pdfDoc.numPages; p += 1) {
+      const page = await pdfDoc.getPage(p);
+      const vp = page.getViewport({ scale: 2 });
+      const c = document.createElement('canvas');
+      c.width = vp.width;
+      c.height = vp.height;
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      bgImages.push(c.toDataURL('image/jpeg', 0.9));
+    }
+  }
+  if (!bgImages.length) return false;
+
+  const neededPages = Math.max(1, bgImages.length);
+  for (let i = 0; i < neededPages; i += 1) {
+    const page = document.createElement('div');
+    page.className = 'a3page';
+    page.style.width = '1754px';
+    page.style.height = '1240px';
+    page.style.background = '#fff';
+    page.style.backgroundImage = `url('${bgImages[Math.min(i, bgImages.length - 1)]}')`;
+    page.style.backgroundSize = 'cover';
+    page.style.backgroundPosition = 'center';
+    page.style.backgroundRepeat = 'no-repeat';
+    const overlay = makeTemplateOverlayHtml(type, ctx, i + 1);
+    if (overlay) {
+      const inner = document.createElement('div');
+      inner.className = 'page-inner';
+      inner.style.padding = '42px 54px 78px 54px';
+      inner.innerHTML = overlay;
+      page.appendChild(inner);
+    }
+    printHost.appendChild(page);
+  }
+  return true;
+}
+
+async function tryRenderTemplatePdf(type, items, totals){
+  const selectedId = TEMPLATE_STATE.selected[type] || '';
+  if (!selectedId) return false;
+  const list = TEMPLATE_STATE[type] || [];
+  const tpl = list.find(t => t.id === selectedId);
+  if (!tpl || !tpl.file) return false;
+
+  const assetType = getTemplateAssetType(tpl.file, tpl);
+  if (type === 'tkp' && assetType !== 'html') return false;
+
+  const printHost = document.getElementById('printDoc');
+  printHost.innerHTML = '';
+  const ctx = buildTemplateContext(type, items, totals);
+
+  const nonHtmlDone = await renderTemplateAssetPages(type, tpl, ctx, printHost);
+  if (nonHtmlDone === false) return false;
+  if (nonHtmlDone === null) {
+    let raw = '';
+    try{
+      const payload = await fetchTemplatePayload(tpl.file);
+      if (payload.mode === 'base64') raw = decodeBase64ToText(payload.base64);
+      else if (payload.mode === 'text') raw = payload.text;
+      else raw = new TextDecoder('utf-8').decode(new Uint8Array(payload.buffer || new ArrayBuffer(0)));
+    }catch(e){
+      return false;
+    }
+    const pages = String(raw).split('<!--PAGE_BREAK-->');
+    pages.forEach(chunk => {
+      const page = document.createElement('div');
+      page.className = 'a3page';
+      page.style.width = '1754px';
+      page.style.height = '1240px';
+      page.style.background = '#fff';
+      const inner = document.createElement('div');
+      inner.className = 'page-inner';
+      inner.style.padding = '42px 54px 78px 54px';
+      inner.innerHTML = renderTemplateString(chunk, ctx);
+      page.appendChild(inner);
+      printHost.appendChild(page);
+    });
+  }
+
+  await waitForImagesReady(printHost);
+  const jsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
+  if (!jsPDF) return false;
+  const pdf = new jsPDF({orientation:'landscape', unit:'pt', format:'a4', compress:true});
+  const pageNodes = Array.from(printHost.querySelectorAll('.a3page'));
+  const pdfW = pdf.internal.pageSize.getWidth();
+  const pdfH = pdf.internal.pageSize.getHeight();
+  for (let i = 0; i < pageNodes.length; i += 1) {
+    const canvas = await html2canvasCapture(pageNodes[i]);
+    const imgData = canvas.toDataURL('image/jpeg', 0.84);
+    if (i > 0) pdf.addPage();
+    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+  }
+  pdf.save(type === 'kp' ? 'KP_ITMen_template.pdf' : 'TKP_ITMen_template.pdf');
+  return true;
+}
+
 function setupPDF() {
   document.getElementById('btnPDF').addEventListener('click', async () => {
     try {
       
       try{ recalc(); }catch(e){}
+      const __items = buildItems();
+      const __totals = computeTotals(__items);
+      renderTable(__items, __totals);
+      const __docType = TEMPLATE_STATE.selectedType === 'tkp' ? 'tkp' : 'kp';
+      if (__docType === 'tkp') {
+        const __tkpBtn = document.getElementById('btnTKP');
+        if (__tkpBtn) {
+          __tkpBtn.click();
+          return;
+        }
+      }
+      if (await tryRenderTemplatePdf('kp', __items, __totals)) return;
 const printHost = document.getElementById('printDoc');
       printHost.innerHTML = '';
       const page = document.createElement('div');
@@ -1307,7 +1699,7 @@ if (__c && __cNode) __cNode.textContent = __c.textContent;
       const jsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
       if(!jsPDF) throw new Error('jsPDF не найден');
       
-const canvas = await html2canvas(page, {scale:2, useCORS:true, backgroundColor:'#ffffff'});
+const canvas = await html2canvasCapture(page);
 
 // Multi-page A3 landscape: fit width, slice by height
 const pdf = new jsPDF({orientation:'landscape', unit:'pt', format:'a3', compress:true});
@@ -1448,7 +1840,16 @@ function getSelectedModules(){
     .filter(Boolean);
 }
 
-function renderTkpClassicPage(host, contentHtml, pageNo, totalPages, logoSrc){
+// Верхний отступ контента на страницах с PDF-фоном: текст начинается под зоной логотипа в шаблоне.
+const TKP_TEMPLATE_CONTENT_TOP_PX = 228;
+
+function renderTkpClassicPage(host, contentHtml, pageNo, totalPages, logoSrc, bgImage, opts){
+  const tableOnlyPage = !!(opts && opts.tableOnlyPage);
+  const effectiveBg = tableOnlyPage ? '' : (bgImage || '');
+  const layoutLandscape = !!(opts && opts.layoutLandscape);
+  const skipGlobalTitle = opts && Object.prototype.hasOwnProperty.call(opts, 'skipGlobalTitle')
+    ? opts.skipGlobalTitle
+    : !!effectiveBg;
   const managerRaw = document.getElementById('managerName')?.value || '—';
   const phoneRaw = document.getElementById('managerPhone')?.value || '—';
   const emailRaw = (document.getElementById('managerEmail')?.value || '').trim();
@@ -1458,47 +1859,125 @@ function renderTkpClassicPage(host, contentHtml, pageNo, totalPages, logoSrc){
   const page = document.createElement('div');
   page.className = 'a3page';
   page.style.background = '#fff';
-  page.style.width = '1754px';
-  page.style.height = '1240px';
+  page.style.position = 'relative';
+  page.style.overflow = 'hidden';
+  if (tableOnlyPage) {
+    page.classList.add('tkp-page-table-only');
+    page.style.background = '#ffffff';
+    page.style.backgroundImage = 'none';
+  }
+  if (effectiveBg) {
+    const bgImg = document.createElement('img');
+    bgImg.src = effectiveBg;
+    bgImg.setAttribute('alt', '');
+    bgImg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:0;pointer-events:none;user-select:none;';
+    page.appendChild(bgImg);
+  }
+  if (tableOnlyPage) {
+    const deco = document.createElement('div');
+    deco.setAttribute('aria-hidden', 'true');
+    deco.style.cssText = 'position:absolute;right:0;bottom:0;width:min(38%,280px);height:18%;min-height:68px;max-height:148px;background:#c41230;clip-path:polygon(20% 0,100% 0,100% 100%,0 100%);z-index:0;pointer-events:none;';
+    page.appendChild(deco);
+  }
+  if (layoutLandscape) {
+    page.style.width = '1754px';
+    page.style.height = '1240px';
+  } else {
+    page.style.width = '1240px';
+    page.style.height = '1754px';
+  }
   const inner = document.createElement('div');
   inner.className = 'page-inner';
-  inner.style.padding = '42px 54px 78px 54px';
+  inner.style.position = 'relative';
+  inner.style.zIndex = '1';
+  {
+    let pt = effectiveBg ? TKP_TEMPLATE_CONTENT_TOP_PX : 44;
+    let pb = 78;
+    if (tableOnlyPage) {
+      pt = 36;
+      pb = 100;
+    }
+    inner.style.padding = `${pt}px 54px ${pb}px 54px`;
+  }
   inner.style.gap = '10px';
   inner.style.fontFamily = 'Arial, Helvetica, sans-serif';
   inner.style.color = '#111';
   inner.style.display = 'block';
   const contactLine = emailRaw ? `${phone}  |  ${email}` : phone;
+  const globalTitleHtml = skipGlobalTitle ? '' : `<div style="font-size:44px;font-weight:700;line-height:1.16;margin:10px 0 22px 0;">ИТМен: функциональность по модулям и бизнес-задачи</div>`;
   inner.innerHTML = `
-    <div style="font-size:42px;font-weight:700;line-height:1.16;margin:10px 0 22px 0;">ИТМен: функциональность по модулям и бизнес-задачи</div>
+    ${globalTitleHtml}
     ${contentHtml}
     <div style="position:absolute;left:56px;right:56px;bottom:30px;display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:16px;line-height:1.25;">
+      <div style="font-size:18px;line-height:1.25;">
         <div><strong>Исп.:</strong> ${manager},</div>
         <div>${contactLine}</div>
       </div>
-      <div style="font-size:16px;color:#333;">-- ${pageNo} of ${totalPages} --</div>
+      <div style="font-size:18px;color:#333;">-- ${pageNo} of ${totalPages} --</div>
     </div>
   `;
   const finalLogoSrc = logoSrc || document.querySelector('.ui-topright-logo img')?.src || document.querySelector('img[alt="Инферит"]')?.src || '';
-  if (finalLogoSrc) {
+  // С фоном из PDF шаблона логотип уже в макете — второй <img> даёт сдвиг и «двойную» иконку.
+  if (finalLogoSrc && !effectiveBg) {
     const logoWrap = document.createElement('div');
     logoWrap.style.display = 'flex';
     logoWrap.style.justifyContent = 'flex-start';
     logoWrap.style.alignItems = 'center';
     logoWrap.style.margin = '0 0 18px 0';
-    logoWrap.style.minHeight = '92px';
+    logoWrap.style.minHeight = '88px';
     const logoClone = document.createElement('img');
     logoClone.setAttribute('src', finalLogoSrc);
     logoClone.setAttribute('alt', 'Инферит ИТМен');
-    logoClone.style.height = '92px';
-    logoClone.style.maxWidth = '620px';
+    logoClone.draggable = false;
+    logoClone.style.height = 'auto';
+    logoClone.style.maxHeight = '88px';
+    logoClone.style.width = 'auto';
+    logoClone.style.maxWidth = '520px';
     logoClone.style.objectFit = 'contain';
+    logoClone.style.objectPosition = 'left center';
     logoClone.style.display = 'block';
     logoWrap.appendChild(logoClone);
     inner.prepend(logoWrap);
   }
   page.appendChild(inner);
   host.appendChild(page);
+}
+
+function buildTkpSpecSubtitle(){
+  const licenseType = document.getElementById('licenseType')?.value || 'annual';
+  const parts = [];
+  parts.push(licenseType === 'annual' ? 'срочные лицензии' : 'бессрочные лицензии');
+  const moduleLabel = (name) => {
+    const map = {
+      'Базовый': 'базовый модуль',
+      'Модель данных': 'модель данных',
+      'Обогащение ПО': 'обогащение ПО',
+      'Призма данных': 'призма данных'
+    };
+    return map[name] || String(name).toLowerCase();
+  };
+  document.querySelectorAll('#modules .chip').forEach(ch => {
+    if (ch.dataset.active !== '1') return;
+    const name = ch.querySelector('h4')?.textContent?.trim();
+    if (name) parts.push(moduleLabel(name));
+  });
+  const supportTier = document.getElementById('supportTier')?.value || '';
+  if (supportTier) {
+    const short = supportTier.replace(/^Support:\s*/i, '').trim();
+    const low = short.toLowerCase();
+    let tp = '';
+    if (/гарант/i.test(low)) tp = 'гарантийная ТП';
+    else if (/стандарт/i.test(low)) tp = 'стандартная ТП';
+    else if (/расшир/i.test(low)) tp = 'расширенная ТП';
+    else tp = `${low} ТП`;
+    parts.push(tp);
+  }
+  const prismaTier = document.getElementById('prismaSupportTier')?.value;
+  if (prismaTier && prismaTier !== 'none') {
+    const pmap = { warranty: 'ТП призма — гарантийная', standard: 'ТП призма — стандартная', extended: 'ТП призма — расширенная' };
+    if (pmap[prismaTier]) parts.push(pmap[prismaTier]);
+  }
+  return '(' + parts.join(' + ') + ')';
 }
 
 function buildTkpPriceTableHtml(items, totals){
@@ -1528,21 +2007,21 @@ function buildTkpPriceTableHtml(items, totals){
     const partnerWithVat = usePartner ? partnerSubtotal + partnerVat : 0;
     return `
       <tr>
-        <td style="padding:8px 10px;border:1px solid #666;">${escapeHtml(it.nomen || '—')}</td>
-        <td style="padding:8px 10px;border:1px solid #666;">${escapeHtml(it.sku || '—')}</td>
-        <td style="padding:8px 10px;border:1px solid #666;">${escapeHtml(it.name || '—')}</td>
-        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${it.qty}</td>
-        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(effUnit)}</td>
-        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(subtotal)}</td>
-        <td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(withVat)}</td>
-        ${usePartner ? `<td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(partnerSubtotal)}</td>` : ''}
-        ${usePartner ? `<td style="padding:8px 10px;border:1px solid #666;text-align:right;">${fmt(partnerWithVat)}</td>` : ''}
+        <td style="padding:8px 10px;border:1px solid #000;">${escapeHtml(it.nomen || '—')}</td>
+        <td style="padding:8px 10px;border:1px solid #000;">${escapeHtml(it.sku || '—')}</td>
+        <td style="padding:8px 10px;border:1px solid #000;">${escapeHtml(it.name || '—')}</td>
+        <td style="padding:8px 10px;border:1px solid #000;text-align:right;">${it.qty}</td>
+        <td style="padding:8px 10px;border:1px solid #000;text-align:right;">${fmt(effUnit)}</td>
+        <td style="padding:8px 10px;border:1px solid #000;text-align:right;">${fmt(subtotal)}</td>
+        <td style="padding:8px 10px;border:1px solid #000;text-align:right;">${fmt(withVat)}</td>
+        ${usePartner ? `<td style="padding:8px 10px;border:1px solid #000;text-align:right;">${fmt(partnerSubtotal)}</td>` : ''}
+        ${usePartner ? `<td style="padding:8px 10px;border:1px solid #000;text-align:right;">${fmt(partnerWithVat)}</td>` : ''}
       </tr>
     `;
   }).join('');
 
   return `
-    <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.25;color:#111;table-layout:fixed;">
+    <table style="width:100%;border-collapse:collapse;border:1px solid #000;font-size:15px;line-height:1.25;color:#111;table-layout:fixed;">
       <colgroup>
         <col style="width:${usePartner ? '12' : '14'}%">
         <col style="width:${usePartner ? '20' : '22'}%">
@@ -1554,36 +2033,71 @@ function buildTkpPriceTableHtml(items, totals){
         ${usePartner ? '<col style="width:6%"><col style="width:6%">' : ''}
       </colgroup>
       <thead>
-        <tr style="background:#f2f2f2;">
-          <th style="padding:8px 10px;border:1px solid #666;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Номенклатура</th>
-          <th style="padding:8px 10px;border:1px solid #666;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Артикул</th>
-          <th style="padding:8px 10px;border:1px solid #666;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Наименование</th>
-          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Кол-во</th>
-          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Цена</th>
-          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Сумма без НДС</th>
-          <th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Сумма с НДС</th>
-          ${usePartner ? '<th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-size:12px;line-height:1.2;color:#111;font-weight:700;">Партнер сумма без НДС</th>' : ''}
-          ${usePartner ? '<th style="padding:8px 10px;border:1px solid #666;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-size:12px;line-height:1.2;color:#111;font-weight:700;">Партнер сумма с НДС</th>' : ''}
+        <tr style="background:#eee;">
+          <th style="padding:8px 10px;border:1px solid #000;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Номенклатура</th>
+          <th style="padding:8px 10px;border:1px solid #000;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Артикул</th>
+          <th style="padding:8px 10px;border:1px solid #000;text-align:left;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Наименование</th>
+          <th style="padding:8px 10px;border:1px solid #000;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Кол-во</th>
+          <th style="padding:8px 10px;border:1px solid #000;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Цена</th>
+          <th style="padding:8px 10px;border:1px solid #000;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Сумма без НДС</th>
+          <th style="padding:8px 10px;border:1px solid #000;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;color:#111;font-weight:700;">Сумма с НДС</th>
+          ${usePartner ? '<th style="padding:8px 10px;border:1px solid #000;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-size:14px;line-height:1.2;color:#111;font-weight:700;">Партнер сумма без НДС</th>' : ''}
+          ${usePartner ? '<th style="padding:8px 10px;border:1px solid #000;text-align:right;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-size:14px;line-height:1.2;color:#111;font-weight:700;">Партнер сумма с НДС</th>' : ''}
         </tr>
       </thead>
       <tbody>
         ${rows}
       </tbody>
-      <tfoot>
-        <tr>
-          <td style="padding:10px;border:1px solid #666;"></td>
-          <td style="padding:10px;border:1px solid #666;"></td>
-          <td style="padding:10px;border:1px solid #666;"></td>
-          <td style="padding:10px;border:1px solid #666;"></td>
-          <td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">Итого:</td>
-          <td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumNoVAT)}</td>
-          <td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumWithVAT)}</td>
-          ${usePartner ? `<td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumNoVATPartner)}</td>` : ''}
-          ${usePartner ? `<td style="padding:10px;border:1px solid #666;text-align:right;font-weight:700;">${fmt(totals.sumWithVATPartner)}</td>` : ''}
-        </tr>
-      </tfoot>
     </table>
+    ${buildTkpTotalsHighlightHtml(totals, usePartner)}
   `;
+}
+
+function buildTkpTotalsHighlightHtml(totals, usePartner){
+  let partnerHtml = '';
+  if (usePartner) {
+    partnerHtml = `
+      <div style="font-size:17px;font-weight:700;color:#111;margin-top:12px;">
+        <div>Партнёр, итого без НДС: <span style="font-variant-numeric:tabular-nums;">${fmt(totals.sumNoVATPartner)}</span></div>
+        <div style="margin-top:6px;">Партнёр, итого с НДС: <span style="font-variant-numeric:tabular-nums;">${fmt(totals.sumWithVATPartner)}</span></div>
+      </div>`;
+  }
+  return `
+    <div style="margin-top:18px;font-size:19px;font-weight:700;color:#111;line-height:1.4;">
+      <div>Итого без НДС: <span style="font-variant-numeric:tabular-nums;">${fmt(totals.sumNoVAT)}</span></div>
+      <div style="margin-top:10px;font-weight:800;">Итого с НДС: <span style="font-variant-numeric:tabular-nums;">${fmt(totals.sumWithVAT)}</span></div>
+      ${partnerHtml}
+    </div>`;
+}
+
+async function html2canvasCapture(el, extraOpts){
+  const host = document.getElementById('printDoc');
+  let prevOp = '';
+  let prevVis = '';
+  let prevLeft = '';
+  if (host && host.contains(el)) {
+    prevOp = host.style.opacity;
+    prevVis = host.style.visibility;
+    prevLeft = host.style.left;
+    host.style.opacity = '1';
+    host.style.visibility = 'visible';
+    host.style.left = '0';
+  }
+  try {
+    return await html2canvas(el, Object.assign({
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    }, extraOpts || {}));
+  } finally {
+    if (host && host.contains(el)) {
+      host.style.opacity = prevOp;
+      host.style.visibility = prevVis;
+      host.style.left = prevLeft;
+    }
+  }
 }
 
 async function waitForImagesReady(root){
@@ -1633,23 +2147,31 @@ function setupTKP() {
       const items = buildItems();
       const totals = computeTotals(items);
       renderTable(items, totals);
+      if (await tryRenderTemplatePdf('tkp', items, totals)) return;
 
       const printHost = document.getElementById('printDoc');
       printHost.innerHTML = '';
+      let templateBgImages = [];
+      try{
+        const tpl = getSelectedTemplate('tkp');
+        templateBgImages = await loadTemplateBackgroundImages(tpl);
+      }catch(e){
+        templateBgImages = [];
+      }
       const selectedModules = getSelectedModules();
       const pages = [];
       selectedModules.forEach(moduleName => {
         const mod = TKP_MODULE_CONTENT[moduleName];
         if (!mod) return;
         pages.push(`
-        <div style="font-size:30px;font-weight:700;margin:8px 0 14px 0;">${escapeHtml(mod.title)}</div>
-        <div style="font-size:20px;line-height:1.45;margin-bottom:14px;"><strong>Общая информация:</strong><br>${escapeHtml(mod.info)}</div>
-        <div style="font-size:24px;font-weight:700;margin:8px 0;">Функции:</div>
-        <ul style="margin:0 0 14px 0;padding-left:24px;font-size:19px;line-height:1.45;">
+        <div style="font-size:32px;font-weight:700;margin:8px 0 14px 0;">${escapeHtml(mod.title)}</div>
+        <div style="font-size:22px;line-height:1.45;margin-bottom:14px;"><strong>Общая информация:</strong><br>${escapeHtml(mod.info)}</div>
+        <div style="font-size:26px;font-weight:700;margin:8px 0;">Функции:</div>
+        <ul style="margin:0 0 14px 0;padding-left:24px;font-size:21px;line-height:1.45;">
             ${mod.functions.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
           </ul>
-        <div style="font-size:24px;font-weight:700;margin:8px 0;">Бизнес-выгоды:</div>
-        <ul style="margin:0;padding-left:24px;font-size:19px;line-height:1.45;">
+        <div style="font-size:26px;font-weight:700;margin:8px 0;">Бизнес-выгоды:</div>
+        <ul style="margin:0;padding-left:24px;font-size:21px;line-height:1.45;">
             ${mod.benefits.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}
           </ul>
         `);
@@ -1657,10 +2179,10 @@ function setupTKP() {
 
       // ТП всегда включается в ТКП, независимо от выбранных модулей
       pages.push(`
-        <div style="font-size:30px;font-weight:700;margin:8px 0 14px 0;">Техническая поддержка «Инферит ИТМен»</div>
-        <div style="font-size:20px;line-height:1.45;">Доступны следующие пакеты технической поддержки: Базовый (гарантийный), Стандартный и Расширенный.</div>
-        <div style="font-size:24px;font-weight:700;margin-top:12px;">Базовый (гарантийный)</div>
-        <ul style="padding-left:24px;font-size:19px;line-height:1.42;">
+        <div style="font-size:32px;font-weight:700;margin:8px 0 14px 0;">Техническая поддержка «Инферит ИТМен»</div>
+        <div style="font-size:22px;line-height:1.45;">Доступны следующие пакеты технической поддержки: Базовый (гарантийный), Стандартный и Расширенный.</div>
+        <div style="font-size:26px;font-weight:700;margin-top:12px;">Базовый (гарантийный)</div>
+        <ul style="padding-left:24px;font-size:21px;line-height:1.42;">
           <li>Количество обращений: без ограничений.</li>
           <li>Каналы приема обращений: портал, e-mail.</li>
           <li>Режим приема обращений: 24x7.</li>
@@ -1668,14 +2190,14 @@ function setupTKP() {
           <li>Доступ к обновлениям продукта (включая обновления безопасности).</li>
           <li>Доступ к базе знаний (Wiki) и системе отслеживания ошибок (BugTracker).</li>
         </ul>
-        <div style="font-size:24px;font-weight:700;">Стандартный</div>
-        <ul style="padding-left:24px;font-size:19px;line-height:1.42;">
+        <div style="font-size:26px;font-weight:700;">Стандартный</div>
+        <ul style="padding-left:24px;font-size:21px;line-height:1.42;">
           <li>Все возможности Базового пакета.</li>
           <li>Моделирование проблемы на стенде службы ТП (при наличии технической возможности).</li>
           <li>Обучение: до 50 обращений в год.</li>
         </ul>
-        <div style="font-size:24px;font-weight:700;">Расширенный</div>
-        <ul style="padding-left:24px;font-size:19px;line-height:1.42;">
+        <div style="font-size:26px;font-weight:700;">Расширенный</div>
+        <ul style="padding-left:24px;font-size:21px;line-height:1.42;">
           <li>Все возможности Стандартного пакета.</li>
           <li>Удаленное подключение к инфраструктуре пользователя для анализа проблемы (до 100 обращений в год).</li>
           <li>Проведение видеоконференцсвязи (до 100 обращений в год).</li>
@@ -1685,28 +2207,56 @@ function setupTKP() {
 
       const tblHtml = buildTkpPriceTableHtml(items, totals);
       pages.push(`
-        <div style="font-size:30px;font-weight:700;margin:8px 0 14px 0;">Пример расчета стоимости проекта</div>
-        <div style="font-size:19px;margin-bottom:12px;">(автоматически сформировано по выбранным параметрам калькулятора)</div>
-        <div style="font-size:20px;">${tblHtml}</div>
+        <div style="font-size:32px;font-weight:700;margin:8px 0 14px 0;">Пример расчета стоимости проекта</div>
+        <div style="font-size:21px;margin-bottom:12px;">${escapeHtml(buildTkpSpecSubtitle())}</div>
+        <div style="font-size:22px;">${tblHtml}</div>
       `);
 
       const totalPages = pages.length;
       const tkpLogoSrc = (await resolveTkpLogoSrc()) || TKP_LOGO_DATA_URL || '';
-      pages.forEach((html, idx) => renderTkpClassicPage(printHost, html, idx + 1, totalPages, tkpLogoSrc));
+      const hasTplBg = templateBgImages.length > 0;
+      pages.forEach((html, idx) => {
+        const isLastPage = idx === (pages.length - 1);
+        // PDF-шаблон — одна эталонная страница дизайна: тот же фон на всех страницах с модулями и ТП; число страниц растёт от выбора.
+        // Финальная страница — таблица в альбоме; фон PDF не кладём (читаемость), красный угол — CSS в renderTkpClassicPage.
+        let bg = '';
+        let skipGlobalTitle = false;
+        if (isLastPage) {
+          skipGlobalTitle = true;
+        } else if (hasTplBg) {
+          bg = templateBgImages[0];
+          skipGlobalTitle = true;
+        }
+        renderTkpClassicPage(printHost, html, idx + 1, totalPages, tkpLogoSrc, bg, {
+          skipGlobalTitle,
+          layoutLandscape: isLastPage,
+          tableOnlyPage: isLastPage
+        });
+      });
       await waitForImagesReady(printHost);
 
       const jsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
       if (!jsPDF) throw new Error('jsPDF не найден');
 
-      const pdf = new jsPDF({orientation:'landscape', unit:'pt', format:'a4', compress:true});
       const pageNodes = Array.from(printHost.querySelectorAll('.a3page'));
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
+      const nPages = pageNodes.length;
+      const onlyTablePage = nPages === 1;
+      const pdf = new jsPDF({
+        orientation: onlyTablePage ? 'landscape' : 'portrait',
+        unit: 'pt',
+        format: 'a4',
+        compress: true
+      });
 
-      for (let i = 0; i < pageNodes.length; i += 1) {
-        const canvas = await html2canvas(pageNodes[i], {scale:2, useCORS:true, backgroundColor:'#ffffff'});
+      for (let i = 0; i < nPages; i += 1) {
+        const canvas = await html2canvasCapture(pageNodes[i]);
         const imgData = canvas.toDataURL('image/jpeg', 0.84);
-        if (i > 0) pdf.addPage();
+        const isLast = i === nPages - 1;
+        if (i > 0) {
+          pdf.addPage('a4', isLast ? 'l' : 'p');
+        }
+        const pdfW = pdf.internal.pageSize.getWidth();
+        const pdfH = pdf.internal.pageSize.getHeight();
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
       }
 
@@ -1721,6 +2271,7 @@ function setupTKP() {
 fillSupportTiers();
 initModules();
 initListeners();
+initTemplateUI().catch(e => console.warn(e));
 recalc();
 setupPDF();
 setupTKP();
