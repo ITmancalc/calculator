@@ -1802,7 +1802,7 @@ function setupPDF() {
           <div><strong>Дата составления:</strong> ${escapeHtml(today)}</div>
           <div><strong>Менеджер:</strong> ${escapeHtml(managerRaw || '—')}</div>
           <div><strong>Телефон:</strong> ${escapeHtml(phoneRaw || '—')}</div>
-          ${emailRaw ? `<div style="padding:6px 10px;border:1px solid #0f766e;background:#ecfeff;border-radius:8px;"><strong>Email:</strong> ${escapeHtml(emailRaw)}</div>` : ''}
+          ${emailRaw ? `<div><strong>Email:</strong> ${escapeHtml(emailRaw)}</div>` : ''}
           <div><strong>Клиент:</strong> ${escapeHtml(valOrDash('clientName'))}</div>
           ${showPartnerInPdf ? `<div><strong>Партнёр:</strong> ${escapeHtml(valOrDash('partnerName'))}</div>
           <div><strong>Партнёрская скидка:</strong> ${escapeHtml(partnerDiscount)}</div>` : ''}
