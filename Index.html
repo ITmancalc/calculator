@@ -1707,6 +1707,7 @@ async function tryRenderTemplatePdf(type, items, totals){
     const imgData = canvas.toDataURL('image/jpeg', 0.84);
     if (i > 0) pdf.addPage();
     pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+    await addInvisibleTableCopyLayer(pdf, pageNodes[i], pdfW, pdfH);
   }
   pdf.save(type === 'kp' ? 'KP_ITMen_template.pdf' : 'TKP_ITMen.pdf');
   return true;
@@ -1811,7 +1812,7 @@ function setupPDF() {
         ${payBlockHtml}
         ${roiBlockHtml}
         <div class="ptable" id="pdfTableWrap"></div>
-        <div class="footer-note">ООО «НЦПР» | Инферит ИТМен | Конфиденциально</div>
+        <div class="footer-note">ООО «ИДТ» | Инферит ИТМен | Конфиденциально</div>
       `;
       page.appendChild(inner);
       appendTkpBottomRightCornerDeco(page);
@@ -1865,12 +1866,13 @@ function setupPDF() {
 
       const jsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
       if (!jsPDF) throw new Error('jsPDF не найден');
+
       const canvas = await html2canvasCapture(page);
-      const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4', compress: true });
+      const pdf = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4', compress:true });
       const pdfW = pdf.internal.pageSize.getWidth();
       const pdfH = pdf.internal.pageSize.getHeight();
-      const imgData = canvas.toDataURL('image/jpeg', 0.84);
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.84), 'JPEG', 0, 0, pdfW, pdfH);
+      await addInvisibleTableCopyLayer(pdf, page, pdfW, pdfH);
       pdf.save('KP_ITMen_partner_profit.pdf');
     } catch(e) {
       alert('Ошибка формирования PDF: ' + e.message);
@@ -2316,6 +2318,142 @@ function buildTkpTotalsHighlightHtml(totals, usePartner){
     </div>`;
 }
 
+// ─── Невидимый текст только в таблице (вид PDF = html2canvas, копировать можно ячейки) ───
+
+let _pdfRuFontB64 = null;
+let _pdfRuFontPromise = null;
+
+async function loadPdfRuFontBase64(){
+  if (_pdfRuFontB64) return _pdfRuFontB64;
+  if (_pdfRuFontPromise) return _pdfRuFontPromise;
+  const urls = [
+    'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.12/fonts/Roboto/Roboto-Regular.ttf',
+    'https://cdn.jsdelivr.net/gh/googlefonts/roboto@2.138/Roboto-Regular.ttf'
+  ];
+  _pdfRuFontPromise = (async () => {
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
+        _pdfRuFontB64 = btoa(bin);
+        return _pdfRuFontB64;
+      } catch (e) { /* next */ }
+    }
+    return '';
+  })();
+  return _pdfRuFontPromise;
+}
+
+function registerPdfRuFont(pdf){
+  if (!_pdfRuFontB64) return false;
+  try {
+    pdf.addFileToVFS('Roboto-Regular.ttf', _pdfRuFontB64);
+    pdf.addFont('Roboto-Regular.ttf', 'RobotoRu', 'normal');
+    pdf.setFont('RobotoRu', 'normal');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function findPdfPriceTable(pageEl){
+  if (!pageEl) return null;
+  const wrap = pageEl.querySelector('#pdfTableWrap');
+  if (wrap) {
+    const t = wrap.querySelector('table');
+    if (t) return t;
+  }
+  const ptable = pageEl.querySelector('.ptable table');
+  if (ptable) return ptable;
+  const inner = pageEl.querySelector('.page-inner');
+  if (inner) {
+    const tables = inner.querySelectorAll('table');
+    if (tables.length) return tables[tables.length - 1];
+  }
+  return pageEl.querySelector('table');
+}
+
+function placeInvisibleTableCellText(pdf, cell, pageRect, scaleX, scaleY){
+  const raw = (cell.innerText || cell.textContent || '').replace(/\r/g, '').trim();
+  if (!raw) return;
+  const cellRect = cell.getBoundingClientRect();
+  if (cellRect.width < 2 || cellRect.height < 2) return;
+
+  const box = {
+    x: (cellRect.left - pageRect.left) * scaleX,
+    y: (cellRect.top - pageRect.top) * scaleY,
+    w: cellRect.width * scaleX,
+    h: cellRect.height * scaleY
+  };
+  const cs = window.getComputedStyle(cell);
+  const align = (cs.textAlign || 'left').toLowerCase();
+  const padL = (parseFloat(cs.paddingLeft) || 0) * scaleX;
+  const padR = (parseFloat(cs.paddingRight) || 0) * scaleX;
+  const innerW = Math.max(4, box.w - padL - padR);
+
+  let fs = Math.max(5.5, Math.min(10.5, box.h * 0.38));
+  pdf.setFontSize(fs);
+  let lines = pdf.splitTextToSize(raw, innerW);
+  const lineH = fs * 1.12;
+  while (lines.length * lineH > box.h - 2 && fs > 5) {
+    fs -= 0.4;
+    pdf.setFontSize(fs);
+    lines = pdf.splitTextToSize(raw, innerW);
+  }
+
+  const blockH = lines.length * lineH;
+  let y0 = box.y + Math.max(fs * 0.75, (box.h - blockH) / 2 + fs * 0.72);
+
+  lines.forEach((line, li) => {
+    const y = y0 + li * lineH;
+    let x = box.x + padL + 1;
+    const lw = pdf.getTextWidth(line);
+    if (align === 'right' || align === 'end') x = box.x + box.w - padR - 1 - lw;
+    else if (align === 'center') x = box.x + (box.w - lw) / 2;
+    pdf.text(line, x, y, { renderingMode: 'invisible' });
+  });
+}
+
+async function addInvisibleTableCopyLayer(pdf, pageEl, pdfW, pdfH){
+  const host = document.getElementById('printDoc');
+  let prevOp = '';
+  let prevVis = '';
+  let prevLeft = '';
+  if (host) {
+    prevOp = host.style.opacity;
+    prevVis = host.style.visibility;
+    prevLeft = host.style.left;
+    host.style.opacity = '1';
+    host.style.visibility = 'visible';
+    host.style.left = '0';
+  }
+  try {
+    await loadPdfRuFontBase64();
+    if (!registerPdfRuFont(pdf)) return;
+    const table = findPdfPriceTable(pageEl);
+    if (!table) return;
+    const pageRect = pageEl.getBoundingClientRect();
+    if (pageRect.width < 1 || pageRect.height < 1) return;
+    const scaleX = pdfW / pageRect.width;
+    const scaleY = pdfH / pageRect.height;
+    table.querySelectorAll('th, td').forEach((cell) => {
+      placeInvisibleTableCellText(pdf, cell, pageRect, scaleX, scaleY);
+    });
+  } catch (e) {
+    console.warn('Слой копирования таблицы:', e);
+  } finally {
+    if (host) {
+      host.style.opacity = prevOp;
+      host.style.visibility = prevVis;
+      host.style.left = prevLeft;
+    }
+  }
+}
+
 async function html2canvasCapture(el, extraOpts){
   const host = document.getElementById('printDoc');
   let prevOp = '';
@@ -2572,62 +2710,39 @@ function setupTKP() {
         }
       }
 
-      const tblHtml = buildTkpPriceTableHtml(items, totals);
-      pages.push(`
-        <div style="font-size:35px;font-weight:700;margin:8px 0 14px 0;">Пример расчета стоимости проекта</div>
-        <div style="font-size:24px;margin-bottom:12px;">${escapeHtml(buildTkpSpecSubtitle())}</div>
-        <div style="font-size:25px;">${tblHtml}</div>
-      `);
-
-      const totalPages = pages.length;
       const tkpLogoSrc = (await resolveTkpLogoSrc()) || TKP_LOGO_DATA_URL || '';
       const hasTplBg = templateBgImages.length > 0;
+      const tblHtml = buildTkpPriceTableHtml(items, totals);
+      pages.push(`
+          <div style="font-size:35px;font-weight:700;margin:8px 0 14px 0;">Пример расчёта стоимости</div>
+          <div style="font-size:24px;margin-bottom:12px;">${escapeHtml(buildTkpSpecSubtitle())}</div>
+          <div style="font-size:25px;">${tblHtml}</div>
+        `);
       pages.forEach((html, idx) => {
         const isLastPage = idx === (pages.length - 1);
-        // PDF-шаблон — одна эталонная страница дизайна: тот же фон на всех страницах.
-        // Для финальной таблицы фон тоже используем, но внутри renderTkpClassicPage
-        // поверх фона кладём белую маску в зоне таблицы.
         let bg = '';
         let skipGlobalTitle = false;
-        if (hasTplBg) {
-          bg = templateBgImages[0];
-          skipGlobalTitle = true;
-        } else if (isLastPage) {
-          skipGlobalTitle = true;
-        }
-        renderTkpClassicPage(printHost, html, idx + 1, totalPages, tkpLogoSrc, bg, {
-          skipGlobalTitle,
-          layoutLandscape: isLastPage,
-          tableOnlyPage: isLastPage
+        if (hasTplBg) { bg = templateBgImages[0]; skipGlobalTitle = true; }
+        else if (isLastPage) { skipGlobalTitle = true; }
+        renderTkpClassicPage(printHost, html, idx + 1, pages.length, tkpLogoSrc, bg, {
+          skipGlobalTitle, layoutLandscape: isLastPage, tableOnlyPage: isLastPage
         });
       });
       await waitForImagesReady(printHost);
-
       const jsPDF = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
       if (!jsPDF) throw new Error('jsPDF не найден');
-
       const pageNodes = Array.from(printHost.querySelectorAll('.a3page'));
       const nPages = pageNodes.length;
       const onlyTablePage = nPages === 1;
-      const pdf = new jsPDF({
-        orientation: onlyTablePage ? 'landscape' : 'portrait',
-        unit: 'pt',
-        format: 'a4',
-        compress: true
-      });
-
+      const pdf = new jsPDF({ orientation: onlyTablePage ? 'landscape' : 'portrait', unit:'pt', format:'a4', compress:true });
       for (let i = 0; i < nPages; i += 1) {
         const canvas = await html2canvasCapture(pageNodes[i]);
         const imgData = canvas.toDataURL('image/jpeg', 0.84);
         const isLast = i === nPages - 1;
-        if (i > 0) {
-          pdf.addPage('a4', isLast ? 'l' : 'p');
-        }
-        const pdfW = pdf.internal.pageSize.getWidth();
-        const pdfH = pdf.internal.pageSize.getHeight();
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH);
+        if (i > 0) pdf.addPage('a4', isLast ? 'l' : 'p');
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
+        await addInvisibleTableCopyLayer(pdf, pageNodes[i], pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
       }
-
       pdf.save('TKP_ITMen.pdf');
     } catch (e) {
       alert('Ошибка формирования ТКП: ' + e.message);
@@ -2643,6 +2758,7 @@ initTemplateUI().catch(e => console.warn(e));
 recalc();
 setupPDF();
 setupTKP();
+loadPdfRuFontBase64().catch(() => {});
 
 
 function toggleSimple(cbId, inputId){
