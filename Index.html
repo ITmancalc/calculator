@@ -422,6 +422,8 @@ body.hidePartnerProfit .stat.profit{display:none !important;}
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="assets/kp-excel-logo-embed.js"></script>
 <script>
 // --- Partner discount PIN gate (lightweight protection) ---
 // NOTE: This is a UI guard only. In a single-file HTML, the PIN can be found in the source by a determined user.
@@ -1336,6 +1338,7 @@ function normalizeTemplateList(list, docType){
 /** option value = docType + ':' + id. Если id — URL, в нём много ':'; split(':') ломает выбор шаблона. */
 function parseTemplateSelectValue(v){
   const s = String(v || '');
+  if (s === 'excel') return { type: 'excel', id: '' };
   const i = s.indexOf(':');
   if (i < 1) return null;
   const type = s.slice(0, i);
@@ -1352,6 +1355,7 @@ function setTemplateOptions(){
     ...(TEMPLATE_STATE.tkp || [])
   ];
   sel.innerHTML = '<option value="">Встроенный (КП по умолчанию)</option>' +
+    '<option value="excel">КП ЭКСЕЛЬ</option>' +
     list.map(t => `<option value="${escapeHtml(t.docType + ':' + t.id)}">[${t.docType.toUpperCase()}] ${escapeHtml(t.name)}</option>`).join('');
   const preferredTpl = list.find(t => t.isDefault) || null;
   const preferred = preferredTpl ? `${preferredTpl.docType}:${preferredTpl.id}` : '';
@@ -1393,10 +1397,16 @@ async function initTemplateUI(){
       TEMPLATE_STATE.selected.kp = '';
       TEMPLATE_STATE.selected.tkp = '';
       TEMPLATE_STATE.selectedType = 'kp';
+      if (v === 'excel') {
+        TEMPLATE_STATE.selectedType = 'excel';
+        return;
+      }
       const parsed = parseTemplateSelectValue(v);
       if (!parsed) return;
       TEMPLATE_STATE.selectedType = parsed.type;
-      TEMPLATE_STATE.selected[parsed.type] = parsed.id;
+      if (parsed.type === 'kp' || parsed.type === 'tkp') {
+        TEMPLATE_STATE.selected[parsed.type] = parsed.id;
+      }
     });
   }
   await loadTemplateRegistry();
@@ -1721,6 +1731,10 @@ function setupPDF() {
       const __items = buildItems();
       const __totals = computeTotals(__items);
       renderTable(__items, __totals);
+      if (TEMPLATE_STATE.selectedType === 'excel') {
+        await exportKpExcel(__items, __totals);
+        return;
+      }
       const __docType = TEMPLATE_STATE.selectedType === 'tkp' ? 'tkp' : 'kp';
       if (__docType === 'tkp') {
         const __tkpBtn = document.getElementById('btnTKP');
@@ -2316,6 +2330,559 @@ function buildTkpTotalsHighlightHtml(totals, usePartner){
       <div style="margin-top:10px;font-weight:800;">Итого с НДС: <span style="font-variant-numeric:tabular-nums;">${fmt(totals.sumWithVAT)}</span></div>
       ${partnerHtml}
     </div>`;
+}
+
+// ─── Экспорт КП в Excel (те же данные, что во встроенном PDF КП) ─────────────────────
+
+function kpExcelCell(value, kind){
+  return { value, kind: kind || 'text' };
+}
+
+// группы по 3 цифры справа: 15 475 000 ₽ (не 1547 500)
+const KP_EXCEL_MONEY_FMT = '# ### ### ### ##0" ₽";-# ### ### ### ##0" ₽";0" ₽"';
+const KP_EXCEL_QTY_FMT = '# ### ### ##0';
+
+/** Те же колонки и значения, что в таблице калькулятора (renderTable) */
+function buildKpPriceTableRowsForExcel(items){
+  const usePartner = !!document.getElementById('usePartnerDiscount')?.checked;
+  const useMod = !!document.getElementById('useModuleDiscount')?.checked;
+  const useSup = !!document.getElementById('useSupportDiscount')?.checked;
+  const useImp = !!document.getElementById('useImplDiscount')?.checked;
+  const usePrismaSup = !!document.getElementById('usePrismaSupportDiscount')?.checked;
+  const usePrismaLic = !!document.getElementById('usePrismaLicDiscount')?.checked;
+  const discPct = getDisc('partnerDiscount', 'usePartnerDiscount');
+  const dMod = getDisc('discModules', 'useModuleDiscount');
+  const dSup = getDisc('discSupport', 'useSupportDiscount');
+  const dImp = getDisc('discImpl', 'useImplDiscount');
+  const dPrismaSup = getDisc('discPrismaSupport', 'usePrismaSupportDiscount');
+  const dPrismaLic = getDisc('discPrismaLic', 'usePrismaLicDiscount');
+
+  const headers = [
+    'Номенклатура', 'Артикул', 'Наименование', 'Кол-во', 'Цена (за ед.)', 'Скидка',
+    'Сумма без НДС', 'Сумма с НДС'
+  ];
+  if (usePartner) {
+    headers.push('Партнёрская цена (за ед.)', 'Партнёр: сумма без НДС', 'Партнёр: сумма с НДС');
+  }
+
+  const rows = items.map((it) => {
+    let lineDisc = 0;
+    if (useMod && it.group === 'license') lineDisc = dMod;
+    if (useSup && it.group === 'support') lineDisc = dSup;
+    if (useImp && it.group === 'impl') lineDisc = dImp;
+    if (usePrismaLic && it.group === 'prisma_license') lineDisc = dPrismaLic;
+    if (usePrismaSup && it.group === 'prisma_support') lineDisc = dPrismaSup;
+    const effUnit = it.unitPrice * (1 - lineDisc);
+    const subtotal = effUnit * it.qty;
+    const vat = it.vatApplies ? subtotal * VAT : 0;
+    const withVat = subtotal + vat;
+    const partnerUnit = usePartner ? (it.group === 'impl' ? effUnit : effUnit * (1 - discPct)) : 0;
+    const partnerSubtotal = usePartner ? partnerUnit * it.qty : 0;
+    const partnerVat = (usePartner && it.vatApplies) ? partnerSubtotal * VAT : 0;
+    const partnerWithVat = usePartner ? partnerSubtotal + partnerVat : 0;
+
+    const row = [
+      kpExcelCell(it.nomen || '—', 'text'),
+      kpExcelCell(it.sku || '—', 'text'),
+      kpExcelCell(it.name || '—', 'text'),
+      kpExcelCell(it.qty, 'qty'),
+      kpExcelCell(Math.round(it.unitPrice || 0), 'money'),
+      kpExcelCell(lineDisc, 'pct'),
+      kpExcelCell(Math.round(subtotal), 'money'),
+      kpExcelCell(Math.round(withVat), 'money')
+    ];
+    if (usePartner) {
+      row.push(
+        kpExcelCell(Math.round(partnerUnit), 'money'),
+        kpExcelCell(Math.round(partnerSubtotal), 'money'),
+        kpExcelCell(Math.round(partnerWithVat), 'money')
+      );
+    }
+    return row;
+  });
+
+  return { headers, rows, showPartner: usePartner };
+}
+
+function kpExcelWidthsForHeaders(headers){
+  const map = {
+    'Номенклатура': 12,
+    'Артикул': 26,
+    'Наименование': 36,
+    'Кол-во': 7,
+    'Цена (за ед.)': 14,
+    'Скидка': 7,
+    'Сумма без НДС': 15,
+    'Сумма с НДС': 15,
+    'Партнёрская цена (за ед.)': 17,
+    'Партнёр: сумма без НДС': 17,
+    'Партнёр: сумма с НДС': 17
+  };
+  return headers.map((h) => map[h] || 12);
+}
+
+function kpExcelIsNumericHeader(header){
+  return !['Номенклатура', 'Артикул', 'Наименование'].includes(header);
+}
+
+function kpExcelSetCellValue(cell, cellData){
+  const kind = cellData?.kind || 'text';
+  const v = cellData?.value;
+  if (kind === 'money') {
+    cell.value = Number(v) || 0;
+    cell.numFmt = KP_EXCEL_MONEY_FMT;
+    return;
+  }
+  if (kind === 'qty') {
+    cell.value = Number(v) || 0;
+    cell.numFmt = KP_EXCEL_QTY_FMT;
+    return;
+  }
+  if (kind === 'pct') {
+    cell.value = Number(v) || 0;
+    cell.numFmt = '0%';
+    return;
+  }
+  cell.value = v;
+}
+
+function buildKpExcelDownloadFilename(){
+  const client = (document.getElementById('clientName')?.value || '').trim() || 'Клиент';
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const safe = client
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 48);
+  return `КП_${safe}_${dd}-${mm}-${yyyy}.xlsx`;
+}
+
+const KP_EXCEL_SITE_URL = 'https://itman.ru/';
+let _kpExcelLogoB64 = '';
+
+function excelColLetter(colNum){
+  let n = colNum;
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+function arrayBufferToBase64(buf){
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function normalizePngBase64(b64){
+  if (!b64) return '';
+  b64 = String(b64).replace(/\s/g, '');
+  // исправление битого embed (обрезался префикс iV)
+  if (b64.startsWith('BORw0KGgo')) b64 = 'iV' + b64;
+  return b64;
+}
+
+function base64ToUint8Array(b64){
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function kpExcelSheetWidthPx(ws, colCount){
+  let px = 0;
+  for (let c = 1; c <= colCount; c += 1) {
+    const w = ws.getColumn(c).width || 8.43;
+    px += Math.round(w * 7 + 5);
+  }
+  return Math.max(320, px);
+}
+
+function kpExcelRowsHeightPx(ws, rowFrom, rowTo){
+  let px = 0;
+  for (let r = rowFrom; r <= rowTo; r += 1) {
+    const h = ws.getRow(r).height || 15;
+    px += Math.round((h * 96) / 72);
+  }
+  return Math.max(48, px);
+}
+
+/** Баннер под точный размер шапки — логотип без сжатия по ширине */
+async function prepareKpExcelLogoBase64(rawB64, bannerW, bannerH){
+  const b64 = normalizePngBase64(rawB64);
+  if (!b64) return '';
+  const bw = Math.max(320, Math.round(bannerW || 1200));
+  const bh = Math.max(48, Math.round(bannerH || 72));
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = bw;
+      c.height = bh;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, bw, bh);
+      const iw = Math.max(1, img.naturalWidth || 1);
+      const ih = Math.max(1, img.naturalHeight || 1);
+      const scale = Math.min(bw / iw, bh / ih);
+      const dw = iw * scale;
+      const dh = ih * scale;
+      ctx.drawImage(img, (bw - dw) / 2, (bh - dh) / 2, dw, dh);
+      resolve(c.toDataURL('image/png').replace(/^data:image\/\w+;base64,/, ''));
+    };
+    img.onerror = () => resolve(b64);
+    img.src = 'data:image/png;base64,' + b64;
+  });
+}
+
+async function getKpExcelLogoBase64(){
+  if (_kpExcelLogoB64) return _kpExcelLogoB64;
+  if (typeof window.KP_EXCEL_LOGO_B64 === 'string' && window.KP_EXCEL_LOGO_B64) {
+    _kpExcelLogoB64 = normalizePngBase64(window.KP_EXCEL_LOGO_B64);
+    return _kpExcelLogoB64;
+  }
+  const paths = ['assets/kp-excel-logo.png', './assets/kp-excel-logo.png'];
+  for (const p of paths) {
+    try {
+      const res = await fetch(p);
+      if (!res.ok) continue;
+      _kpExcelLogoB64 = arrayBufferToBase64(await res.arrayBuffer());
+      return _kpExcelLogoB64;
+    } catch (e) { /* file:// or missing */ }
+  }
+  try {
+    const src = document.querySelector('.ui-topright-logo img')?.src || TKP_LAST_PAGE_LOGO_SRC || '';
+    if (src) {
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = src;
+      });
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, img.naturalWidth || 200);
+      c.height = Math.max(1, img.naturalHeight || 48);
+      c.getContext('2d').drawImage(img, 0, 0);
+      _kpExcelLogoB64 = c.toDataURL('image/png').replace(/^data:image\/\w+;base64,/, '');
+      return _kpExcelLogoB64;
+    }
+  } catch (e) {}
+  return '';
+}
+
+function getKpExcelDocumentContext(){
+  const today = new Date().toLocaleDateString('ru-RU');
+  const validRaw = document.getElementById('validUntil')?.value || '';
+  const validFmt = validRaw ? new Date(validRaw.replace(/-/g, '/')).toLocaleDateString('ru-RU') : '—';
+  const managerRaw = (document.getElementById('managerName')?.value || '').trim();
+  const phoneRaw = (document.getElementById('managerPhone')?.value || '').trim();
+  const emailRaw = (document.getElementById('managerEmail')?.value || '').trim();
+  const partnerDiscountNum = parseFloat(document.getElementById('partnerDiscount')?.value || '0') || 0;
+  const partnerDiscount = partnerDiscountNum.toFixed(0) + '%';
+  const showPartnerInDoc = !!(document.getElementById('usePartnerDiscount')?.checked && partnerDiscountNum > 0 && (document.getElementById('partnerName')?.value || '').trim());
+
+  const meta = [
+    ['Дата составления', today],
+    ['Менеджер', managerRaw || '—'],
+    ['Телефон', phoneRaw || '—'],
+  ];
+  if (emailRaw) meta.push(['Email', emailRaw]);
+  meta.push(['Клиент', valOrDash('clientName')]);
+  if (showPartnerInDoc) {
+    meta.push(['Партнёр', valOrDash('partnerName')]);
+    meta.push(['Партнёрская скидка', partnerDiscount]);
+  }
+  meta.push(['Действует до', validFmt]);
+
+  const blocks = [];
+  if (document.getElementById('showPaymentTerms')?.checked) {
+    const shipISO = document.getElementById('shipDate')?.value || '';
+    const delayVal = parseInt(document.getElementById('payDelay')?.value || '0', 10) || 0;
+    const shipFmt = shipISO ? fmtRuDate(shipISO) : '—';
+    let expFmt = '—';
+    if (shipISO) {
+      const d = new Date(shipISO + 'T00:00:00');
+      d.setDate(d.getDate() + delayVal);
+      expFmt = fmtRuDate(toISODate(d));
+    }
+    const payTxt = delayVal > 0 ? ('отсрочка ' + delayVal + ' дней') : 'без отсрочки';
+    blocks.push({
+      title: 'Условия отгрузки и оплаты',
+      rows: [
+        ['Отгрузка', shipFmt],
+        ['Условия оплаты', payTxt],
+        ['Ожидаемая оплата', expFmt]
+      ]
+    });
+  }
+  if (document.getElementById('showROI')?.checked) {
+    const roiVal = (document.getElementById('kpiROI')?.textContent || '—').trim() || '—';
+    blocks.push({ title: 'ROI (оценка окупаемости)', rows: [['ROI', roiVal]] });
+  }
+  if (showPartnerInDoc) {
+    blocks.push({
+      title: null,
+      rows: [
+        ['Заработок партнёра', (document.getElementById('kpiPartnerProfit')?.textContent || '—').trim() || '—'],
+        ['Стоимость проекта (с НДС)', (document.getElementById('kpiCost')?.textContent || '—').trim() || '—']
+      ]
+    });
+  }
+  const comment = (document.getElementById('comment')?.value || '').trim();
+  return { meta, blocks, comment, showPartnerInDoc };
+}
+
+function kpExcelApplyBorder(cell, style){
+  const b = { style: style || 'thin', color: { argb: 'FFD1D5DB' } };
+  cell.border = { top: b, left: b, bottom: b, right: b };
+}
+
+function kpExcelApplyCellStyle(cell, st){
+  if (!st) return;
+  if (st.font) cell.font = st.font;
+  if (st.alignment) cell.alignment = st.alignment;
+  if (st.fill) cell.fill = st.fill;
+}
+
+function kpExcelWriteLabelValue(ws, row, lastCol, label, value, styles){
+  const L = excelColLetter;
+  const labelEnd = Math.min(2, lastCol);
+  const valueStart = Math.min(3, lastCol);
+  ws.mergeCells(`A${row}:${L(labelEnd)}${row}`);
+  ws.mergeCells(`${L(valueStart)}${row}:${L(lastCol)}${row}`);
+  const cLabel = ws.getCell(`A${row}`);
+  const cVal = ws.getCell(`${L(valueStart)}${row}`);
+  cLabel.value = label;
+  cVal.value = value;
+  kpExcelApplyCellStyle(cLabel, styles?.label);
+  kpExcelApplyCellStyle(cVal, styles?.value);
+  ws.getRow(row).height = styles?.height || 18;
+}
+
+async function exportKpExcel(items, totals){
+  const ExcelJS = window.ExcelJS;
+  if (!ExcelJS) throw new Error('Библиотека Excel не загружена. Проверьте интернет и обновите страницу (ExcelJS).');
+
+  const table = buildKpPriceTableRowsForExcel(items);
+  const lastCol = Math.max(7, table.headers.length);
+  const L = excelColLetter;
+  const ctx = getKpExcelDocumentContext();
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Инферит ИТМен';
+  const ws = wb.addWorksheet('КП', {
+    properties: { defaultRowHeight: 16 },
+    pageSetup: {
+      paperSize: 9,
+      orientation: 'landscape',
+      horizontalCentered: true,
+      margins: {
+        left: 0.45, right: 0.45, top: 0.5, bottom: 0.5,
+        header: 0.2, footer: 0.2
+      }
+    }
+  });
+
+  const colWidths = kpExcelWidthsForHeaders(table.headers);
+  for (let c = 1; c <= lastCol; c += 1) {
+    ws.getColumn(c).width = colWidths[c - 1] || 12;
+  }
+
+  let row = 1;
+  ws.getRow(1).height = 28;
+  ws.getRow(2).height = 28;
+  ws.getRow(3).height = 12;
+  ws.mergeCells(`A1:${L(lastCol)}3`);
+  const headerW = kpExcelSheetWidthPx(ws, lastCol);
+  const headerH = kpExcelRowsHeightPx(ws, 1, 3);
+  const logoB64 = await prepareKpExcelLogoBase64(await getKpExcelLogoBase64(), headerW, headerH);
+  if (logoB64) {
+    const imgId = wb.addImage({
+      buffer: base64ToUint8Array(logoB64),
+      extension: 'png'
+    });
+    ws.addImage(imgId, {
+      tl: { col: 0, row: 0 },
+      ext: { width: headerW, height: headerH },
+      editAs: 'oneCell'
+    });
+  }
+
+  row = 4;
+  ws.mergeCells(`A${row}:${L(lastCol)}${row}`);
+  const siteCell = ws.getCell(`A${row}`);
+  siteCell.value = KP_EXCEL_SITE_URL;
+  siteCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF4B5563' }, underline: true };
+  siteCell.alignment = { vertical: 'middle', horizontal: 'left' };
+  ws.getRow(row).height = 18;
+
+  row = 5;
+  ws.getRow(row).height = 6;
+
+  row = 6;
+  ws.mergeCells(`A${row}:${L(lastCol)}${row}`);
+  const titleCell = ws.getCell(`A${row}`);
+  titleCell.value = 'Коммерческое предложение — Инферит ИТМен';
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF111827' } };
+  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  ws.getRow(row).height = 28;
+
+  row = 7;
+  const labelStyle = {
+    font: { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF111827' } },
+    alignment: { vertical: 'middle', horizontal: 'left', wrapText: true }
+  };
+  const valueStyle = {
+    font: { name: 'Calibri', size: 10, color: { argb: 'FF111827' } },
+    alignment: { vertical: 'middle', horizontal: 'left', wrapText: true }
+  };
+  ctx.meta.forEach(([label, value]) => {
+    kpExcelWriteLabelValue(ws, row, lastCol, label, value, { label: labelStyle, value: valueStyle });
+    row += 1;
+  });
+
+  ctx.blocks.forEach((block) => {
+    row += 1;
+    if (block.title) {
+      ws.mergeCells(`A${row}:${L(lastCol)}${row}`);
+      const t = ws.getCell(`A${row}`);
+      t.value = block.title;
+      t.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF111827' } };
+      ws.getRow(row).height = 20;
+      row += 1;
+    }
+    block.rows.forEach(([label, value]) => {
+      kpExcelWriteLabelValue(ws, row, lastCol, label, value, { label: labelStyle, value: valueStyle });
+      row += 1;
+    });
+  });
+
+  row += 1;
+  const tableHeaderRow = row;
+  const headFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+  const headFont = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF111827' } };
+  const stripeFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } };
+  table.headers.forEach((h, i) => {
+    const cell = ws.getCell(row, i + 1);
+    cell.value = h;
+    cell.font = headFont;
+    cell.fill = headFill;
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: kpExcelIsNumericHeader(h) ? 'right' : 'left',
+      wrapText: true
+    };
+    kpExcelApplyBorder(cell);
+  });
+  ws.getRow(row).height = 32;
+
+  const bodyFont = { name: 'Calibri', size: 9, color: { argb: 'FF111827' } };
+  const idxNoVat = table.headers.indexOf('Сумма без НДС');
+  const idxWithVat = table.headers.indexOf('Сумма с НДС');
+  const idxPNoVat = table.headers.indexOf('Партнёр: сумма без НДС');
+  const idxPWithVat = table.headers.indexOf('Партнёр: сумма с НДС');
+  const idxLabel = Math.max(0, idxNoVat - 1);
+
+  table.rows.forEach((dataRow, ri) => {
+    row += 1;
+    const nameText = String(dataRow[2]?.value ?? '');
+    const nameLen = nameText.length;
+    dataRow.forEach((cellData, i) => {
+      const cell = ws.getCell(row, i + 1);
+      kpExcelSetCellValue(cell, cellData);
+      cell.font = bodyFont;
+      const hdr = table.headers[i] || '';
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: kpExcelIsNumericHeader(hdr) ? 'right' : 'left',
+        wrapText: true
+      };
+      if (ri % 2 === 1) cell.fill = stripeFill;
+      kpExcelApplyBorder(cell);
+    });
+    ws.getRow(row).height = nameLen > 50 ? 34 : nameLen > 32 ? 28 : 22;
+  });
+
+  row += 1;
+  ws.getRow(row).height = 26;
+  for (let c = 1; c <= lastCol; c += 1) {
+    const cell = ws.getCell(row, c);
+    cell.fill = headFill;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF111827' } };
+    kpExcelApplyBorder(cell);
+  }
+  if (idxLabel >= 0) {
+    const lbl = ws.getCell(row, idxLabel + 1);
+    lbl.value = 'Итого:';
+    lbl.alignment = { horizontal: 'right', vertical: 'middle' };
+  }
+  const kpExcelSetTotalMoney = (colIdx, amount) => {
+    if (colIdx < 0) return;
+    const cell = ws.getCell(row, colIdx + 1);
+    cell.value = Math.round(Number(amount) || 0);
+    cell.numFmt = KP_EXCEL_MONEY_FMT;
+    cell.alignment = { horizontal: 'right', vertical: 'middle' };
+  };
+  kpExcelSetTotalMoney(idxNoVat, totals.sumNoVAT);
+  kpExcelSetTotalMoney(idxWithVat, totals.sumWithVAT);
+  if (table.showPartner) {
+    kpExcelSetTotalMoney(idxPNoVat, totals.sumNoVATPartner);
+    kpExcelSetTotalMoney(idxPWithVat, totals.sumWithVATPartner);
+  }
+
+  ws.views = [{
+    state: 'frozen',
+    ySplit: tableHeaderRow,
+    showGridLines: false,
+    activeCell: `A${tableHeaderRow + 1}`
+  }];
+
+  if (ctx.comment) {
+    row += 2;
+    ws.mergeCells(`A${row}:${L(lastCol)}${row}`);
+    const cmtCell = ws.getCell(`A${row}`);
+    cmtCell.value = 'Комментарий: ' + ctx.comment;
+    cmtCell.font = { name: 'Calibri', size: 10 };
+    cmtCell.alignment = { wrapText: true, vertical: 'top' };
+    ws.getRow(row).height = 36;
+  }
+
+  row += 2;
+  ws.mergeCells(`A${row}:${L(lastCol)}${row}`);
+  const foot = ws.getCell(`A${row}`);
+  foot.value = 'ООО «НЦПР» | Инферит ИТМен | Конфиденциально';
+  foot.font = { name: 'Calibri', size: 9, color: { argb: 'FF6B7280' } };
+  foot.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(row).height = 18;
+
+  const lastRow = row;
+  ws.pageSetup.printArea = `A1:${L(lastCol)}${lastRow}`;
+  ws.pageSetup.fitToPage = true;
+  ws.pageSetup.fitToWidth = 1;
+  ws.pageSetup.fitToHeight = 0;
+  ws.pageSetup.scale = 100;
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = buildKpExcelDownloadFilename();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 // ─── Невидимый текст только в таблице (вид PDF = html2canvas, копировать можно ячейки) ───
